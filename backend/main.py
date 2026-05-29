@@ -12,9 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 DEFAULT_ORIGINS = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,tauri://localhost,http://tauri.localhost,http://localhost:1420,http://localhost:1421,http://localhost:1422,http://localhost:1423,http://localhost:1424,http://0.0.0.0:5173"
 
-LAN_ORIGINS = "*"
-
-from routers import health, auth, ontology, actions, chat, scenarios, inference, notifications, reminders, agent, reasoning, effects, ws, memory, perception, suggestions, insights
+from routers import health, auth, ontology, actions, chat, scenarios, inference, notifications, reminders, agent, reasoning, effects, ws, memory, perception, suggestions, insights, ontology_definition, events, ontology_admin
 
 def _get_db_session():
     engine = _get_engine()
@@ -59,11 +57,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SalesClaw API", version="1.0.0", lifespan=lifespan)
 
 allowed_origins_str = os.environ.get("ALLOWED_ORIGINS", DEFAULT_ORIGINS)
-allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+allowed_cors_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+if not allowed_cors_origins:
+    allowed_cors_origins = ["http://localhost:5173", "http://localhost:3000"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -85,3 +86,6 @@ app.include_router(memory.router)
 app.include_router(perception.router)
 app.include_router(suggestions.router)
 app.include_router(insights.router)
+app.include_router(ontology_definition.router)
+app.include_router(events.router)
+app.include_router(ontology_admin.router)

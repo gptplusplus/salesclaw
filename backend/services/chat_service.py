@@ -9,6 +9,7 @@ from models.ontology import OntologyObject, TimeSeriesData, ObjectEvent, ObjectL
 from models.domain import Doctor, Hospital, Product, SalesTarget, ComplianceAlert, BudgetCategory, ExpenseROI
 from models.action import ActionProposal
 from llm import is_llm_configured, chat_with_llm, build_system_prompt
+from services.ontology_context import build_ontology_context_for_query, format_context_for_llm
 
 
 def _get_recent_time_series(db: Session, object_id: str, series_name: str, limit: int = 3) -> List:
@@ -91,6 +92,14 @@ async def generate_response_with_llm(db: Session, message: str, thread_id: Optio
 
     data_summary = _get_data_summary(db)
     system_prompt = build_system_prompt(data_summary)
+
+    try:
+        oag_context = build_ontology_context_for_query(db, message)
+        if oag_context.get("contexts"):
+            oag_text = format_context_for_llm(oag_context)
+            system_prompt += f"\n\n## Ontology 上下文\n{oag_text}"
+    except Exception:
+        pass
 
     messages = []
     if thread_id:

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from database import get_db
-from auth import require_auth
+from auth import require_auth, get_current_user
 from models.user import User
 from schemas.chat import ChatRequest, ChatResponse
 from services.chat_service import (
@@ -242,3 +242,25 @@ async def chat_stream(
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post("/oag")
+async def oag_chat_endpoint(
+    request: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    from services.oag_service import oag_chat
+    result = await oag_chat(db, request.get("message", ""), user.id if user else "anonymous")
+    return result
+
+
+@router.get("/oag/analyze/{object_id}")
+async def oag_analyze_endpoint(
+    object_id: str,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    from services.oag_service import oag_object_analysis
+    result = oag_object_analysis(db, object_id)
+    return result

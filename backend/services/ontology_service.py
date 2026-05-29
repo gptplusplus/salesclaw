@@ -1,7 +1,9 @@
 import uuid
+import json
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from models.ontology import OntologyObject, ObjectLink, ObjectAction, ActionParameter, ObjectEvent, TimeSeriesData
+from services import lifecycle_service
 from models.domain import (
     Doctor, Hospital, Product, SalesRep, VisitRecord, SalesTarget,
     ComplianceAlert, AcademicEvent, Territory, RecoveryPlan,
@@ -12,6 +14,9 @@ from models.domain import (
     ClinicalTrial, PatientProgram, ResearchCollaboration,
     MeetingCompliance, ExpenseCompliance, CustomerCompliance, ComplianceRule,
 )
+from services import link_service
+from services.event_bus import publish_ontology_event, EventType
+from services.cache_service import get_cached_object, set_cached_object, invalidate_object_cache, invalidate_all_cache
 
 DOMAIN_MODEL_MAP = {
     "Doctor": Doctor,
@@ -186,6 +191,8 @@ def build_ontology_object_response(
         "lifecycleStage": obj.lifecycle_stage,
         "sentiment": obj.sentiment,
         "complianceRiskLevel": obj.compliance_risk_level,
+        "ownerId": obj.owner_id,
+        "stakeholders": json.loads(obj.stakeholders) if obj.stakeholders else None,
     }
 
 
@@ -194,6 +201,7 @@ def _batch_load_related_data(db: Session, object_ids: List[str], objects: List[O
         return {}
 
     all_links = db.query(ObjectLink).filter(ObjectLink.source_id.in_(object_ids)).all()
+    all_links = link_service.filter_expired_links(all_links)
     links_by_obj: Dict[str, List[ObjectLink]] = {}
     for link in all_links:
         links_by_obj.setdefault(link.source_id, []).append(link)
@@ -278,6 +286,9 @@ def get_all_objects(db: Session, object_type: Optional[str] = None, page: int = 
 
 
 def get_object_by_id(db: Session, object_type: str, object_id: str) -> Optional[Dict[str, Any]]:
+    cached = get_cached_object(object_id)
+    if cached:
+        return cached
     obj = db.query(OntologyObject).filter(
         OntologyObject.id == object_id,
         OntologyObject.object_type == object_type,
@@ -286,7 +297,7 @@ def get_object_by_id(db: Session, object_type: str, object_id: str) -> Optional[
         return None
     related_data = _batch_load_related_data(db, [obj.id], [obj])
     data = related_data.get(obj.id, {})
-    return build_ontology_object_response(
+    result = build_ontology_object_response(
         obj,
         data.get("links", []),
         data.get("actions", []),
@@ -295,6 +306,8 @@ def get_object_by_id(db: Session, object_type: str, object_id: str) -> Optional[
         data.get("time_series", []),
         data.get("domain_row"),
     )
+    set_cached_object(object_id, result)
+    return result
 
 
 def search_objects(db: Session, object_type: str, query: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -349,6 +362,8 @@ def create_object(db: Session, object_type: str, data: Dict[str, Any]) -> Dict[s
         lifecycle_stage=data.get("lifecycleStage"),
         sentiment=data.get("sentiment"),
         compliance_risk_level=data.get("complianceRiskLevel"),
+        owner_id=data.get("ownerId"),
+        stakeholders=json.dumps(data["stakeholders"]) if data.get("stakeholders") else None,
     )
     db.add(obj)
 
@@ -356,23 +371,43 @@ def create_object(db: Session, object_type: str, data: Dict[str, Any]) -> Dict[s
     _create_domain_row(db, object_type, obj_id, properties)
 
     for link_data in data.get("links", []):
+        link_type = link_data.get("linkType", "")
+        target_id = link_data.get("targetId", "")
         link_props = link_data.get("properties", {}) or {}
+
+        valid, reason = link_service.validate_link_cardinality(db, obj_id, link_type, target_id)
+        if not valid:
+            continue
+
+        confidence = link_props.get("confidence")
+        has_conflict, conflict_desc = link_service.check_link_conflict(db, obj_id, link_type, target_id, confidence)
+        if has_conflict and confidence is not None:
+            confidence = min(confidence, 0.3)
+
         link = ObjectLink(
             source_id=obj_id,
-            link_type=link_data.get("linkType", ""),
-            target_id=link_data.get("targetId", ""),
+            link_type=link_type,
+            target_id=target_id,
             target_name=link_data.get("targetName", ""),
             target_type=link_data.get("targetType", ""),
             link_strength=link_props.get("strength"),
             link_frequency=link_props.get("frequency"),
             link_volume=link_props.get("volume"),
-            confidence=link_props.get("confidence"),
+            confidence=confidence,
             valid_from=link_props.get("valid_from"),
             valid_to=link_props.get("valid_to"),
             provenance=link_props.get("provenance", "manual"),
             inverse_relation=link_props.get("inverse_relation"),
         )
         db.add(link)
+        db.flush()
+
+        link_service.create_inverse_link(
+            db, obj_id, link_type, target_id,
+            link_data.get("targetName", ""),
+            link_data.get("targetType", ""),
+            obj,
+        )
 
     for action_data in data.get("actions", []):
         action = ObjectAction(
@@ -420,7 +455,10 @@ def create_object(db: Session, object_type: str, data: Dict[str, Any]) -> Dict[s
             db.add(ts)
 
     db.commit()
-    return _get_full_object(db, obj)
+    result = _get_full_object(db, obj)
+    set_cached_object(obj_id, result)
+    publish_ontology_event(EventType.OBJECT_CREATED, object_id=obj_id, object_type=object_type, object_name=data.get("name", ""), source="api")
+    return result
 
 
 def _create_domain_row(db: Session, object_type: str, obj_id: str, properties: Dict[str, Any]):
@@ -451,21 +489,42 @@ def update_object(db: Session, object_type: str, object_id: str, data: Dict[str,
     if not obj:
         return None
 
+    old_lifecycle_stage = obj.lifecycle_stage
+    old_status = obj.status
+
     if "name" in data:
         obj.name = data["name"]
     if "status" in data:
         obj.status = data["status"]
     if "lifecycleStage" in data:
-        obj.lifecycle_stage = data["lifecycleStage"]
+        target_stage = data["lifecycleStage"]
+        if obj.lifecycle_stage and not lifecycle_service.validate_transition(
+            obj.object_type, obj.lifecycle_stage, target_stage
+        ):
+            raise ValueError(
+                f"Invalid lifecycle transition for {obj.object_type}: "
+                f"{obj.lifecycle_stage} → {target_stage}"
+            )
+        obj.lifecycle_stage = target_stage
     if "sentiment" in data:
         obj.sentiment = data["sentiment"]
     if "complianceRiskLevel" in data:
         obj.compliance_risk_level = data["complianceRiskLevel"]
+    if "ownerId" in data:
+        obj.owner_id = data["ownerId"]
+    if "stakeholders" in data:
+        obj.stakeholders = json.dumps(data["stakeholders"]) if data["stakeholders"] else None
 
     if "properties" in data:
         _update_domain_row(db, object_type, object_id, data["properties"])
 
     db.commit()
+    invalidate_object_cache(object_id)
+    publish_ontology_event(EventType.OBJECT_UPDATED, object_id=object_id, object_type=object_type, object_name=obj.name, source="api")
+    if old_lifecycle_stage != obj.lifecycle_stage:
+        publish_ontology_event(EventType.LIFECYCLE_CHANGED, object_id=object_id, object_type=object_type, object_name=obj.name, data={"from": old_lifecycle_stage, "to": obj.lifecycle_stage}, source="api")
+    if old_status != obj.status:
+        publish_ontology_event(EventType.STATUS_CHANGED, object_id=object_id, object_type=object_type, object_name=obj.name, data={"from": old_status, "to": obj.status}, source="api")
     return _get_full_object(db, obj)
 
 
@@ -493,7 +552,17 @@ def delete_object(db: Session, object_type: str, object_id: str) -> bool:
     if not obj:
         return False
 
+    obj_name = obj.name
+
+    links = db.query(ObjectLink).filter(ObjectLink.source_id == object_id).all()
+    for link in links:
+        link_service.delete_inverse_link(db, link.source_id, link.link_type, link.target_id)
     db.query(ObjectLink).filter(ObjectLink.source_id == object_id).delete()
+
+    incoming_links = db.query(ObjectLink).filter(ObjectLink.target_id == object_id).all()
+    for link in incoming_links:
+        link_service.delete_inverse_link(db, link.source_id, link.link_type, link.target_id)
+    db.query(ObjectLink).filter(ObjectLink.target_id == object_id).delete()
     db.query(ObjectAction).filter(ObjectAction.object_id == object_id).delete()
     db.query(ObjectEvent).filter(ObjectEvent.object_id == object_id).delete()
     db.query(TimeSeriesData).filter(TimeSeriesData.object_id == object_id).delete()
@@ -506,6 +575,8 @@ def delete_object(db: Session, object_type: str, object_id: str) -> bool:
 
     db.delete(obj)
     db.commit()
+    invalidate_object_cache(object_id)
+    publish_ontology_event(EventType.OBJECT_DELETED, object_id=object_id, object_type=object_type, object_name=obj_name, source="api")
     return True
 
 

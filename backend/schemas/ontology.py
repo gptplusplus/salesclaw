@@ -49,6 +49,8 @@ class OntologyObjectCreate(BaseModel):
     lifecycleStage: Optional[str] = None
     sentiment: Optional[str] = None
     complianceRiskLevel: Optional[str] = None
+    ownerId: Optional[str] = None
+    stakeholders: Optional[List[str]] = None
     properties: Dict[str, Any] = {}
     links: List[LinkCreate] = []
     actions: List[ActionCreate] = []
@@ -62,6 +64,8 @@ class OntologyObjectUpdate(BaseModel):
     lifecycleStage: Optional[str] = None
     sentiment: Optional[str] = None
     complianceRiskLevel: Optional[str] = None
+    ownerId: Optional[str] = None
+    stakeholders: Optional[List[str]] = None
     properties: Optional[Dict[str, Any]] = None
 
 
@@ -120,6 +124,8 @@ class OntologyObjectResponse(BaseModel):
     lifecycleStage: Optional[str] = None
     sentiment: Optional[str] = None
     complianceRiskLevel: Optional[str] = None
+    ownerId: Optional[str] = None
+    stakeholders: Optional[List[str]] = None
 
 
 class OntologyObjectListResponse(BaseModel):

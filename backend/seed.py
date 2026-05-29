@@ -35,6 +35,7 @@ def seed_database():
             return
 
         _seed_users(db)
+        _seed_permissions(db)
         _seed_ontology_objects(db)
         _seed_domain_properties(db)
         _seed_object_links(db)
@@ -68,43 +69,64 @@ def _seed_users(db):
     db.add(user)
 
 
+def _seed_permissions(db):
+    from models.permission import ObjectPermission
+
+    admin_perms = [
+        ObjectPermission(
+            id="perm_admin_all",
+            user_id="default_user",
+            role="admin",
+            object_type="*",
+            object_id="*",
+            can_read=True,
+            can_write=True,
+            can_execute=True,
+            can_admin=True,
+        ),
+    ]
+
+    for perm in admin_perms:
+        db.add(perm)
+
+
 def _seed_ontology_objects(db):
     objects_data = [
-        ("d1", "Doctor", "张主任", "warning", "at_risk", "negative", "medium"),
-        ("d2", "Doctor", "李教授", "normal", "mature", "positive", "low"),
-        ("d3", "Doctor", "王主治", "normal", "developing", "neutral", None),
-        ("d4", "Doctor", "陈副主任", "normal", "recovering", "positive", None),
-        ("d5", "Doctor", "刘主任医师", "warning", "developing", "neutral", None),
-        ("h1", "Hospital", "上海瑞金医院", "normal", None, None, None),
-        ("h2", "Hospital", "上海中山医院", "normal", None, None, None),
-        ("p1", "Product", "诺欣妥", "normal", None, None, None),
-        ("p2", "Product", "可定", "normal", None, None, None),
-        ("r1", "SalesRep", "王代表", "normal", None, None, None),
-        ("r2", "SalesRep", "赵代表", "normal", None, None, None),
-        ("r3", "SalesRep", "孙代表", "warning", None, None, "high"),
-        ("v1", "VisitRecord", "学术拜访-0318", "normal", None, None, None),
-        ("t1", "SalesTarget", "Q1 销售目标-诺欣妥", "warning", None, None, None),
-        ("c1", "ComplianceAlert", "招待费超限预警", "critical", None, None, None),
-        ("e1", "AcademicEvent", "心血管学术沙龙", "normal", None, None, None),
-        ("ter1", "Territory", "华东区", "normal", None, None, None),
-        ("rp1", "RecoveryPlan", "张主任流失挽回计划", "warning", None, None, None),
-        ("sf1", "SalesFlow", "Q1 M1流向-诺欣妥", None, None, None, None),
-        ("sf2", "SalesFlow", "Q1 M2流向-可定", None, None, None, None),
-        ("mp1", "MarketPotential", "华东区市场潜力", None, None, None, None),
-        ("hd1", "HospitalDevelopment", "上海第六人民医院开发", None, None, None, None),
-        ("bc1", "BudgetCategory", "销售费用预算", None, None, None, None),
-        ("bc2", "BudgetCategory", "市场费用预算", None, None, None, None),
-        ("ec1", "ExpenseClassification", "C1费用-总部活动", None, None, None, None),
-        ("ec2", "ExpenseClassification", "C2A费用-区域活动", None, None, None, None),
-        ("cc1", "CustomerCategory", "A类客户", None, None, None, None),
-        ("cc2", "CustomerCategory", "B类客户", None, None, None, None),
-        ("pdca1", "PDCAPlan", "张主任挽回计划", None, None, None, None),
-        ("hs1", "HospitalStrategy", "瑞金医院策略", None, None, None, None),
-        ("rws1", "RWSProject", "心衰患者真实世界研究", None, None, None, None),
-        ("pp1", "PatientProgram", "诺欣妥患者援助项目", None, None, None, None),
-        ("cr1", "ComplianceRule", "会议时长限制", None, None, None, None),
-        ("cr2", "ComplianceRule", "单次费用限制", None, None, None, None),
-        ("mc1", "MeetingCompliance", "心血管学术沙龙合规检查", None, None, None, None),
+        ("d1", "Doctor", "张主任", "warning", "at_risk", "negative", "medium", "r1"),
+        ("d2", "Doctor", "李教授", "normal", "loyal", "positive", "low", "r1"),
+        ("d3", "Doctor", "王主治", "normal", "active", "neutral", None, "r1"),
+        ("d4", "Doctor", "陈副主任", "normal", "active", "positive", None, "r1"),
+        ("d5", "Doctor", "刘主任医师", "warning", "active", "neutral", None, "r1"),
+        ("h1", "Hospital", "上海瑞金医院", "normal", None, None, None, "r1"),
+        ("h2", "Hospital", "上海中山医院", "normal", None, None, None, "r1"),
+        ("p1", "Product", "诺欣妥", "normal", None, None, None, "default_user"),
+        ("p2", "Product", "可定", "normal", None, None, None, "default_user"),
+        ("r1", "SalesRep", "王代表", "normal", None, None, None, "default_user"),
+        ("r2", "SalesRep", "赵代表", "normal", None, None, None, "default_user"),
+        ("r3", "SalesRep", "孙代表", "warning", None, None, "high", "default_user"),
+        ("v1", "VisitRecord", "学术拜访-0318", "normal", None, None, None, "r1"),
+        ("t1", "SalesTarget", "Q1 销售目标-诺欣妥", "warning", None, None, None, "default_user"),
+        ("c1", "ComplianceAlert", "招待费超限预警", "critical", None, None, None, "default_user"),
+        ("e1", "AcademicEvent", "心血管学术沙龙", "normal", None, None, None, "default_user"),
+        ("ter1", "Territory", "华东区", "normal", None, None, None, "default_user"),
+        ("rp1", "RecoveryPlan", "张主任流失挽回计划", "warning", None, None, None, "default_user"),
+        ("sf1", "SalesFlow", "Q1 M1流向-诺欣妥", None, None, None, None, "default_user"),
+        ("sf2", "SalesFlow", "Q1 M2流向-可定", None, None, None, None, "default_user"),
+        ("mp1", "MarketPotential", "华东区市场潜力", None, None, None, None, "default_user"),
+        ("hd1", "HospitalDevelopment", "上海第六人民医院开发", None, None, None, None, "default_user"),
+        ("bc1", "BudgetCategory", "销售费用预算", None, None, None, None, "default_user"),
+        ("bc2", "BudgetCategory", "市场费用预算", None, None, None, None, "default_user"),
+        ("ec1", "ExpenseClassification", "C1费用-总部活动", None, None, None, None, "default_user"),
+        ("ec2", "ExpenseClassification", "C2A费用-区域活动", None, None, None, None, "default_user"),
+        ("cc1", "CustomerCategory", "A类客户", None, None, None, None, "default_user"),
+        ("cc2", "CustomerCategory", "B类客户", None, None, None, None, "default_user"),
+        ("pdca1", "PDCAPlan", "张主任挽回计划", None, None, None, None, "default_user"),
+        ("hs1", "HospitalStrategy", "瑞金医院策略", None, None, None, None, "default_user"),
+        ("rws1", "RWSProject", "心衰患者真实世界研究", None, None, None, None, "default_user"),
+        ("pp1", "PatientProgram", "诺欣妥患者援助项目", None, None, None, None, "default_user"),
+        ("cr1", "ComplianceRule", "会议时长限制", None, None, None, None, "default_user"),
+        ("cr2", "ComplianceRule", "单次费用限制", None, None, None, None, "default_user"),
+        ("mc1", "MeetingCompliance", "心血管学术沙龙合规检查", None, None, None, None, "default_user"),
     ]
     for obj_data in objects_data:
         obj = OntologyObject(
@@ -115,6 +137,7 @@ def _seed_ontology_objects(db):
             lifecycle_stage=obj_data[4],
             sentiment=obj_data[5],
             compliance_risk_level=obj_data[6],
+            owner_id=obj_data[7],
         )
         db.add(obj)
 

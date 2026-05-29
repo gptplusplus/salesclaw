@@ -6,6 +6,7 @@ from models.inference import InferenceRule, InferenceResult
 from models.ontology import OntologyObject, ObjectLink
 from models.notification import Notification
 from services.ontology_service import _split_field, DOMAIN_MODEL_MAP
+from services import link_service
 
 
 def combine_confidence_bayesian(prior: float, evidence_strength: float) -> float:
@@ -264,28 +265,48 @@ def _apply_conclusion(db: Session, rule: InferenceRule, matched_objects: List[On
             except (ValueError, TypeError):
                 strength = rule.confidence_base or 0.5
 
-        existing = db.query(ObjectLink).filter(
-            ObjectLink.source_id == source.id,
-            ObjectLink.target_id == target.id,
-            ObjectLink.link_type == link_type,
-        ).first()
-        if not existing:
-            link = ObjectLink(
-                source_id=source.id,
-                link_type=link_type,
-                target_id=target.id,
-                target_name=target.name,
-                target_type=target.object_type,
-                link_strength=strength,
-            )
-            db.add(link)
+        has_conflict, conflict_desc = link_service.check_link_conflict(
+            db, source.id, link_type, target.id, strength
+        )
+        if has_conflict:
             result = {
-                "applied": True,
-                "detail": f"Created {link_type} link: {source.name} -> {target.name}",
+                "applied": False,
+                "detail": f"Link conflict: {conflict_desc}",
                 "source_entity_id": source.id,
                 "target_entity_id": target.id,
                 "inferred_link_type": link_type,
             }
+        else:
+            existing = db.query(ObjectLink).filter(
+                ObjectLink.source_id == source.id,
+                ObjectLink.target_id == target.id,
+                ObjectLink.link_type == link_type,
+            ).first()
+            if not existing:
+                link = ObjectLink(
+                    source_id=source.id,
+                    link_type=link_type,
+                    target_id=target.id,
+                    target_name=target.name,
+                    target_type=target.object_type,
+                    link_strength=strength,
+                    provenance="inference",
+                )
+                db.add(link)
+                db.flush()
+
+                link_service.create_inverse_link(
+                    db, source.id, link_type, target.id,
+                    target.name, target.object_type, source,
+                )
+
+                result = {
+                    "applied": True,
+                    "detail": f"Created {link_type} link: {source.name} -> {target.name}",
+                    "source_entity_id": source.id,
+                    "target_entity_id": target.id,
+                    "inferred_link_type": link_type,
+                }
 
     elif conclusion_type == "new_property" and matched_objects:
         obj = matched_objects[0]

@@ -6,6 +6,7 @@ from agents.tools import AGENT_TOOLS
 from llm import get_llm_client
 import os
 import uuid
+import json
 
 MAX_REFLECTION_ROUNDS = 2
 
@@ -20,6 +21,7 @@ def get_llm():
 def perceive_node(state: AgentState):
     """Gather initial context and anomalies from the environment."""
     from services.chat_service import _get_data_summary
+    from services.ontology_context import build_ontology_context_for_query, format_context_for_llm
     from database import _get_engine
     from sqlalchemy.orm import sessionmaker
     engine = _get_engine()
@@ -27,7 +29,6 @@ def perceive_node(state: AgentState):
     try:
         summary = _get_data_summary(db)
         
-        # 注入近期episodic记忆
         try:
             from services.memory_service import search_memory_semantic
             messages = state.get("messages", [])
@@ -42,6 +43,17 @@ def perceive_node(state: AgentState):
                 summary += f"\n\n近期记忆参考：\n{memory_context}"
         except Exception as e:
             print(f"Memory retrieval in perceive failed: {e}")
+
+        try:
+            messages = state.get("messages", [])
+            query_text = messages[-1].content if messages and hasattr(messages[-1], 'content') else ""
+            if query_text:
+                oag_context = build_ontology_context_for_query(db, query_text)
+                if oag_context.get("contexts"):
+                    oag_text = format_context_for_llm(oag_context)
+                    summary += f"\n\nOntology 上下文：\n{oag_text}"
+        except Exception as e:
+            print(f"Ontology context in perceive failed: {e}")
     finally:
         db.close()
 
@@ -86,22 +98,39 @@ def reason_node(state: AgentState):
     user_input = state.get("messages", [])[-1].content if state.get("messages") else ""
     perception_data = state.get("perception_results", "")
 
-    # 判断推理类型并调用对应的推理服务
+    ontology_note = ""
+    try:
+        from services.ontology_context import build_ontology_context_for_query, format_context_for_llm
+        from database import _get_engine
+        from sqlalchemy.orm import sessionmaker
+
+        engine = _get_engine()
+        db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+        try:
+            if user_input:
+                oag_context = build_ontology_context_for_query(db, user_input)
+                if oag_context.get("contexts"):
+                    oag_text = format_context_for_llm(oag_context)
+                    ontology_note = f"\nOntology Context:\n{oag_text}"
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"Ontology context in reason failed: {e}")
+
     reasoning_type = _classify_reasoning_type(user_input)
-    
+
     if reasoning_type == "attribution":
-        hypotheses = _execute_attribution_reasoning(user_input, perception_data, memory_note)
+        hypotheses = _execute_attribution_reasoning(user_input, perception_data, memory_note, ontology_note)
     elif reasoning_type == "causal":
-        hypotheses = _execute_causal_reasoning(user_input, perception_data, memory_note)
+        hypotheses = _execute_causal_reasoning(user_input, perception_data, memory_note, ontology_note)
     elif reasoning_type == "temporal":
-        hypotheses = _execute_temporal_reasoning(user_input, perception_data, memory_note)
+        hypotheses = _execute_temporal_reasoning(user_input, perception_data, memory_note, ontology_note)
     else:
-        # 默认LLM推理
         sys_prompt = SystemMessage(
             content="You are the SalesClaw Reasoning Engine. Analyze the following perception data and form clear hypotheses regarding sales risks or compliance."
         )
         prompt = HumanMessage(
-            content=f"Perception Data:\n{perception_data}{memory_note}\nUser input: {user_input}"
+            content=f"Perception Data:\n{perception_data}{memory_note}{ontology_note}\nUser input: {user_input}"
         )
         response = llm.invoke([sys_prompt, prompt])
         hypotheses = response.content
@@ -144,7 +173,7 @@ def _classify_reasoning_type(query: str) -> str:
     return "llm"
 
 
-def _execute_attribution_reasoning(user_input: str, perception_data: str, memory_note: str) -> str:
+def _execute_attribution_reasoning(user_input: str, perception_data: str, memory_note: str, ontology_note: str = "") -> str:
     """执行归因分析推理"""
     import re
     
@@ -152,7 +181,7 @@ def _execute_attribution_reasoning(user_input: str, perception_data: str, memory
     entity_id_match = re.search(r'[a-f0-9-]{32,36}', user_input)
     if not entity_id_match:
         # 未找到实体ID，直接降级为LLM推理
-        return _fallback_llm_reasoning(user_input, perception_data, memory_note)
+        return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
     
     entity_id = entity_id_match.group(0)
     
@@ -173,25 +202,27 @@ def _execute_attribution_reasoning(user_input: str, perception_data: str, memory
                 for f in factors[:5]:
                     report += f"- {f.get('factorLabel', 'N/A')}: 贡献度 {f.get('contributionPercent', 0):.1f}% ({f.get('direction', 'N/A')})\n"
                     report += f"  {f.get('evidence', '')}\n"
+                if ontology_note:
+                    report += f"\nOntology上下文参考：{ontology_note}"
                 return report
         finally:
             db.close()
     except Exception as e:
         print(f"Attribution reasoning failed: {e}")
     
-    return _fallback_llm_reasoning(user_input, perception_data, memory_note)
+    return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
 
 
-def _execute_causal_reasoning(user_input: str, perception_data: str, memory_note: str) -> str:
+def _execute_causal_reasoning(user_input: str, perception_data: str, memory_note: str, ontology_note: str = "") -> str:
     """执行因果推理"""
     import re
     
     entity_id_match = re.search(r'[a-f0-9-]{32,36}', user_input)
     if not entity_id_match:
-        return _fallback_llm_reasoning(user_input, perception_data, memory_note)
-    
+        return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
+
     entity_id = entity_id_match.group(0)
-    
+
     try:
         from services.reasoning_service import causal_reasoning
         from database import _get_engine
@@ -208,25 +239,27 @@ def _execute_causal_reasoning(user_input: str, perception_data: str, memory_note
                     path = chain.get("path", [])
                     steps = " → ".join([f"{step.get('targetName', 'N/A')}({step.get('linkType', '')})" for step in path])
                     report += f"链条{i}: {result.get('sourceName', '')} → {steps}\n"
+                if ontology_note:
+                    report += f"\nOntology上下文参考：{ontology_note}"
                 return report
         finally:
             db.close()
     except Exception as e:
         print(f"Causal reasoning failed: {e}")
-    
-    return _fallback_llm_reasoning(user_input, perception_data, memory_note)
+
+    return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
 
 
-def _execute_temporal_reasoning(user_input: str, perception_data: str, memory_note: str) -> str:
+def _execute_temporal_reasoning(user_input: str, perception_data: str, memory_note: str, ontology_note: str = "") -> str:
     """执行时序分析推理"""
     import re
     
     entity_id_match = re.search(r'[a-f0-9-]{32,36}', user_input)
     if not entity_id_match:
-        return _fallback_llm_reasoning(user_input, perception_data, memory_note)
-    
+        return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
+
     entity_id = entity_id_match.group(0)
-    
+
     try:
         from services.reasoning_service import temporal_reasoning
         from database import _get_engine
@@ -242,16 +275,18 @@ def _execute_temporal_reasoning(user_input: str, perception_data: str, memory_no
                 for trend in trends:
                     report += f"- {trend.get('seriesName', 'N/A')}: {trend.get('direction', 'N/A')} "
                     report += f"(变化率: {trend.get('changePercent', 0):.1f}%)\n"
+                if ontology_note:
+                    report += f"\nOntology上下文参考：{ontology_note}"
                 return report
         finally:
             db.close()
     except Exception as e:
         print(f"Temporal reasoning failed: {e}")
-    
-    return _fallback_llm_reasoning(user_input, perception_data, memory_note)
+
+    return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
 
 
-def _fallback_llm_reasoning(user_input: str, perception_data: str, memory_note: str) -> str:
+def _fallback_llm_reasoning(user_input: str, perception_data: str, memory_note: str, ontology_note: str = "") -> str:
     """降级为LLM推理"""
     llm = get_llm()
     if not llm:
@@ -261,7 +296,7 @@ def _fallback_llm_reasoning(user_input: str, perception_data: str, memory_note: 
         content="You are the SalesClaw Reasoning Engine. Analyze the following perception data and form clear hypotheses regarding sales risks or compliance."
     )
     prompt = HumanMessage(
-        content=f"Perception Data:\n{perception_data}{memory_note}\nUser input: {user_input}"
+        content=f"Perception Data:\n{perception_data}{memory_note}{ontology_note}\nUser input: {user_input}"
     )
     response = llm.invoke([sys_prompt, prompt])
     return response.content
@@ -338,10 +373,13 @@ def plan_node(state: AgentState):
         return {"current_plan": "[Fallback] Wait and monitor target metrics for another week."}
 
     sys_prompt = SystemMessage(
-        content="You are the SalesClaw Planning Engine. Given the reasoning hypotheses, formulate a precise action plan targeting specific entities (Doctors, Hospital, Budgets). Keep it actionable. Output in structured format with priorities."
+        content="""You are the SalesClaw Planning Engine. Given the reasoning hypotheses, formulate a precise action plan targeting specific entities (Doctors, Hospital, Budgets). Keep it actionable. Output in structured format with priorities.
+
+Your plan must specify which Ontology Action to execute on which object. Format each step as: ACTION_NAME on OBJECT_ID with PARAMETERS.
+Available actions include: scheduleVisit, updateSentiment, flagComplianceRisk, markAsAtRisk, generateVisitBrief, updateAccessStatus, dismiss, escalate, approve, reject, updateActualValue, allocateBudget, advanceCycle, updateStatus, inviteToEvent."""
     )
     prompt = HumanMessage(
-        content=f"Hypotheses:\n{state.get('hypotheses')}\n\nProvide a structured action plan with clear steps, priorities, and target entities."
+        content=f"Hypotheses:\n{state.get('hypotheses')}\n\nProvide a structured action plan with clear steps, priorities, and target entities. Each step must reference a specific Ontology Action and object ID."
     )
     response = llm.invoke([sys_prompt, prompt])
     return {"current_plan": response.content}
@@ -358,13 +396,14 @@ def execute_node(state: AgentState):
     plan = state.get("current_plan", "")
     execution_details = []
 
-    # 使用统一的数据库会话管理事务
     from database import _get_engine
     from sqlalchemy.orm import sessionmaker
-    
+    from services.action_executor import ActionExecutor
+    import re
+
     engine = _get_engine()
     db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
-    
+
     try:
         tool_map = {tool.name: tool for tool in AGENT_TOOLS}
 
@@ -378,11 +417,37 @@ def execute_node(state: AgentState):
                     tool_args = tc.get("args", {})
                     if tool_name in tool_map:
                         try:
-                            # 注入db session到工具调用中（如果工具支持）
                             result = tool_map[tool_name].invoke(tool_args)
                             results.append({"tool": tool_name, "args": tool_args, "result": result, "status": "success"})
                         except Exception as e:
                             results.append({"tool": tool_name, "args": tool_args, "result": str(e), "status": "failed"})
+
+        action_pattern = re.compile(r'(\w+)\s+on\s+([a-f0-9_-]+)(?:\s+with\s+(.+))?', re.IGNORECASE)
+        for match in action_pattern.finditer(plan):
+            action_name = match.group(1)
+            object_id = match.group(2)
+            params_str = match.group(3)
+            try:
+                params = json.loads(params_str) if params_str else {}
+            except (json.JSONDecodeError, TypeError):
+                params = {}
+
+            try:
+                executor = ActionExecutor(db)
+                exec_result = executor.execute_object_action(object_id, action_name, params)
+                results.append({
+                    "tool": f"action_executor:{action_name}",
+                    "args": {"object_id": object_id, "action_name": action_name, "params": params},
+                    "result": exec_result,
+                    "status": "success" if exec_result.get("success") else "failed",
+                })
+            except Exception as e:
+                results.append({
+                    "tool": f"action_executor:{action_name}",
+                    "args": {"object_id": object_id, "action_name": action_name, "params": params},
+                    "result": str(e),
+                    "status": "failed",
+                })
 
         if not results:
             results.append({
@@ -392,16 +457,14 @@ def execute_node(state: AgentState):
                 "status": "logged"
             })
 
-        # 所有工具调用成功后提交事务
         db.commit()
-        
+
         return {
             "execution_status": f"✅ Plan executed. {len(results)} action(s) processed.",
             "tool_results": {r["tool"]: r for r in results},
             "needs_human_review": False,
         }
     except Exception as e:
-        # 失败时回滚事务
         db.rollback()
         return {
             "execution_status": f"❌ Execution failed: {str(e)}",

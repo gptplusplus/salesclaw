@@ -107,6 +107,7 @@ def _create_index_if_not_exists(conn, index_name: str, table_name: str, column_n
 
 def create_tables():
     engine = _get_engine()
+    from models.permission import ObjectPermission
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _init_vector_tables()
@@ -138,6 +139,21 @@ def _migrate_schema():
     existing_tables = inspector.get_table_names()
 
     with engine.begin() as conn:
+        if "object_permissions" not in existing_tables:
+            from models.permission import ObjectPermission
+            ObjectPermission.__table__.create(bind=engine)
+            logger.info("Created object_permissions table")
+
+        if "ontology_change_requests" not in existing_tables:
+            from models.ontology_change import OntologyChangeRequest
+            OntologyChangeRequest.__table__.create(bind=engine)
+            logger.info("Created ontology_change_requests table")
+
+        if "ontology_versions" not in existing_tables:
+            from models.ontology_change import OntologyVersion
+            OntologyVersion.__table__.create(bind=engine)
+            logger.info("Created ontology_versions table")
+
         if "object_links" in existing_tables:
             existing_columns = {col["name"] for col in inspector.get_columns("object_links")}
 
@@ -159,8 +175,14 @@ def _migrate_schema():
         if "ontology_objects" in existing_tables:
             existing_columns = {col["name"] for col in inspector.get_columns("ontology_objects")}
 
+            if "owner_id" not in existing_columns:
+                _add_column_if_not_exists(conn, "ontology_objects", "owner_id", "VARCHAR")
+            if "stakeholders" not in existing_columns:
+                _add_column_if_not_exists(conn, "ontology_objects", "stakeholders", "TEXT")
+
             _create_index_if_not_exists(conn, "idx_ontology_object_type", "ontology_objects", "object_type")
             _create_index_if_not_exists(conn, "idx_ontology_status", "ontology_objects", "status")
+            _create_index_if_not_exists(conn, "idx_ontology_owner_id", "ontology_objects", "owner_id")
 
         if "action_proposals" in existing_tables:
             existing_columns = {col["name"] for col in inspector.get_columns("action_proposals")}

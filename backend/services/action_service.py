@@ -5,6 +5,8 @@ from models.execution import ExecutionLog
 from schemas.action import ReasoningChainSchema, ActionDefinitionSchema, PendingActionSchema
 from services.ontology_service import _split_field
 import uuid
+import json
+from datetime import datetime, timezone
 
 
 def get_pending_actions(db: Session, user_id: str) -> List[Dict[str, Any]]:
@@ -43,47 +45,39 @@ def execute_action(db: Session, action_id: str, user_id: str) -> Optional[Dict[s
         return None
     if action.status != "approved":
         return {"action_id": action.id, "status": action.status, "message": "Action must be approved first"}
-    
-    previous_status = action.status
+
     action.status = "executed"
-    
-    if action.action_type == "scheduleVisit":
-        from models.domain import Doctor
-        from models.ontology import OntologyObject
-        from datetime import datetime, timedelta, timezone
-        doctor = db.query(Doctor).filter(Doctor.id == action.entity_id).first()
-        if doctor:
-            doctor.next_recommended_visit_date = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
-        obj = db.query(OntologyObject).filter(OntologyObject.id == action.entity_id).first()
-        if obj:
-            obj.status = "normal"
-    elif action.action_type == "flagComplianceRisk":
-        from models.domain import ComplianceAlert
-        alert = ComplianceAlert(
-            id=f"alert_{action_id}",
-            severity="high",
-            risk_type=action.action_type,
-            alert_description=action.description or "AI标记的合规风险",
-            alert_status="pending",
+    action.started_at = datetime.now(timezone.utc)
+
+    from services.action_executor import ActionExecutor
+    executor = ActionExecutor(db)
+
+    if action.entity_id and action.action_type:
+        exec_result = executor.execute_object_action(
+            action.entity_id, action.action_type,
+            {"reason": action.description} if action.description else {},
+            user_id
         )
-        db.add(alert)
-    elif action.action_type == "inviteToEvent":
-        pass
-    
-    log_id = str(uuid.uuid4())
-    log_entry = ExecutionLog(
-        id=log_id,
-        action_name=action.title,
-        tool_name=action.action_type or "manual",
-        parameters="",
-        status="executed",
-        result=f"Action executed. Previous status: {previous_status}",
-        plan_id=action_id,
-        user_id=user_id,
-    )
-    db.add(log_entry)
-    db.commit()
-    
+        action.execution_logs = json.dumps(exec_result)
+        if exec_result.get("success"):
+            action.completed_at = datetime.now(timezone.utc)
+        else:
+            action.error_message = exec_result.get("error", "Unknown error")
+            action.status = "failed"
+        db.commit()
+    else:
+        log_id = str(uuid.uuid4())
+        log_entry = ExecutionLog(
+            id=log_id, action_name=action.title,
+            tool_name=action.action_type or "manual",
+            parameters="", status="executed",
+            result=f"Action executed. Previous status: approved",
+            plan_id=action_id, user_id=user_id,
+        )
+        db.add(log_entry)
+        action.completed_at = datetime.now(timezone.utc)
+        db.commit()
+
     try:
         import asyncio
         from services.ws_manager import manager
@@ -93,8 +87,8 @@ def execute_action(db: Session, action_id: str, user_id: str) -> Optional[Dict[s
         }))
     except Exception as e:
         print(f"WebSocket notification failed: {e}")
-    
-    return {"action_id": action.id, "status": "executed", "message": "Action executed successfully", "log_id": log_id}
+
+    return {"action_id": action.id, "status": action.status, "message": "Action executed successfully"}
 
 
 def get_execution_logs(db: Session, action_id: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:

@@ -12,6 +12,7 @@ from schemas.ontology import (
     OntologyObjectCreate, OntologyObjectUpdate,
 )
 from services.ontology_service import get_all_objects, get_object_by_id, search_objects, create_object, update_object, delete_object
+from services.permission_service import check_permission, filter_sensitive_fields, check_action_permission, get_readable_object_types
 from models.ontology import OntologyObject, ObjectEvent
 from models.audit import AuditLog
 
@@ -26,7 +27,29 @@ def list_objects(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
 ):
+    if user and type:
+        readable_types = get_readable_object_types(user)
+        if "*" not in readable_types and type not in readable_types:
+            raise HTTPException(status_code=403, detail="No read permission for this object type")
+
     result = get_all_objects(db, type, page, page_size)
+
+    if user:
+        readable_types = get_readable_object_types(user)
+        if "*" not in readable_types:
+            filtered_results = []
+            for item in result.get("results", []):
+                obj_type = item.get("objectType", "")
+                if obj_type in readable_types:
+                    item["properties"] = filter_sensitive_fields(user, obj_type, item.get("properties", {}))
+                    filtered_results.append(item)
+            result["results"] = filtered_results
+            result["total"] = len(filtered_results)
+        else:
+            for item in result.get("results", []):
+                obj_type = item.get("objectType", "")
+                item["properties"] = filter_sensitive_fields(user, obj_type, item.get("properties", {}))
+
     return OntologyObjectListResponse(**result)
 
 
@@ -38,7 +61,15 @@ def search(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
 ):
+    if user and not check_permission(db, user, object_type, None, "can_read"):
+        raise HTTPException(status_code=403, detail="No read permission for this object type")
+
     results = search_objects(db, object_type, query, limit)
+
+    if user:
+        for item in results:
+            item["properties"] = filter_sensitive_fields(user, object_type, item.get("properties", {}))
+
     return SearchResponse(results=results, total=len(results), limit=limit)
 
 
@@ -49,9 +80,16 @@ def get_object(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user),
 ):
+    if user and not check_permission(db, user, object_type, object_id, "can_read"):
+        raise HTTPException(status_code=403, detail="No read permission for this object type")
+
     result = get_object_by_id(db, object_type, object_id)
     if not result:
         return {"id": object_id, "type": object_type, "properties": {}, "links": {}, "metadata": {}}
+
+    if user:
+        result["properties"] = filter_sensitive_fields(user, object_type, result.get("properties", {}))
+
     return result
 
 
@@ -62,6 +100,9 @@ def create_new_object(
     db: Session = Depends(get_db),
     user: User = Depends(require_auth),
 ):
+    if not check_permission(db, user, object_type, None, "can_write"):
+        raise HTTPException(status_code=403, detail="No write permission for this object type")
+
     result = create_object(db, object_type, data.model_dump())
     return result
 
@@ -74,6 +115,9 @@ def update_existing_object(
     db: Session = Depends(get_db),
     user: User = Depends(require_auth),
 ):
+    if not check_permission(db, user, object_type, object_id, "can_write"):
+        raise HTTPException(status_code=403, detail="No write permission for this object type")
+
     update_data = data.model_dump(exclude_none=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -90,6 +134,9 @@ def delete_existing_object(
     db: Session = Depends(get_db),
     user: User = Depends(require_auth),
 ):
+    if not check_permission(db, user, object_type, object_id, "can_admin"):
+        raise HTTPException(status_code=403, detail="No admin permission for this object type")
+
     success = delete_object(db, object_type, object_id)
     if not success:
         raise HTTPException(status_code=404, detail="Object not found")
@@ -104,38 +151,19 @@ def execute_action(
     db: Session = Depends(get_db),
     user: User = Depends(require_auth),
 ):
-    obj = db.query(OntologyObject).filter(
-        OntologyObject.id == object_id,
-        OntologyObject.object_type == object_type,
-    ).first()
-    if not obj:
-        return ActionExecutionResponse(success=False, error="Object not found", transaction_id="")
+    from services.action_executor import ActionExecutor
+    executor = ActionExecutor(db)
+    result = executor.execute_object_action(object_id, req.action, req.params, user.id)
 
-    event = ObjectEvent(
-        id=f"evt_{uuid.uuid4().hex[:8]}",
-        object_id=object_id,
-        event_type="ActionExecuted",
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        description=f"Executed action: {req.action}",
-        related_object_id=object_id,
-        related_object_name=obj.name,
-    )
-    db.add(event)
-
-    audit = AuditLog(
-        id=f"al_{uuid.uuid4().hex[:8]}",
-        action="execute_action",
-        entity_type=object_type,
-        entity_id=object_id,
-        entity_name=obj.name,
-        user_id=user.id,
-        details=f"Executed action {req.action} with params: {req.params}",
-    )
-    db.add(audit)
-    db.commit()
+    if not result.get("success"):
+        return ActionExecutionResponse(
+            success=False,
+            error=result.get("error", "Action execution failed"),
+            transaction_id=result.get("execution_id", ""),
+        )
 
     return ActionExecutionResponse(
         success=True,
-        data={"action": req.action, "objectId": object_id},
-        transaction_id=f"tx_{uuid.uuid4().hex[:8]}",
+        data=result,
+        transaction_id=result.get("execution_id", f"tx_{uuid.uuid4().hex[:8]}"),
     )

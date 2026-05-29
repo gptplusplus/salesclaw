@@ -8,6 +8,7 @@ class OntologyObject(Base):
     __table_args__ = (
         Index("idx_ontology_object_type", "object_type"),
         Index("idx_ontology_status", "status"),
+        Index("idx_ontology_owner_id", "owner_id"),
     )
 
     id = Column(String, primary_key=True)
@@ -17,6 +18,8 @@ class OntologyObject(Base):
     lifecycle_stage = Column(String, nullable=True)
     sentiment = Column(String, nullable=True)
     compliance_risk_level = Column(String, nullable=True)
+    owner_id = Column(String, nullable=True)
+    stakeholders = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
