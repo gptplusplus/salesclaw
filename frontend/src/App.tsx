@@ -1,16 +1,19 @@
-import { useState } from 'react';
+import { useState, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { OntologyProvider } from './contexts/OntologyContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
-import DecisionOverview from './components/DecisionOverview';
-import OntologyGraphView from './components/OntologyGraphView';
-import ScenarioSim from './components/ScenarioSim';
-import InferenceRulesPanel from './components/InferenceRulesPanel';
-import InsightEngine from './components/InsightEngine';
-import ChatInterface from './components/ChatInterface';
+import OnboardingGuide from './components/OnboardingGuide';
+
+const DecisionOverview = lazy(() => import('./components/DecisionOverview'));
+const OntologyGraphView = lazy(() => import('./components/OntologyGraphView'));
+const ScenarioSim = lazy(() => import('./components/ScenarioSim'));
+const InsightEngine = lazy(() => import('./components/InsightEngine'));
+const InferenceRulesPanel = lazy(() => import('./components/InferenceRulesPanel'));
+const AIToolbox = lazy(() => import('./components/AIToolbox'));
+const ChatInterface = lazy(() => import('./components/ChatInterface'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,33 +32,40 @@ const pageVariants = {
 };
 
 function DashboardContent() {
-  const [activeTab, setActiveTab] = useState('decision');
+  const [activeTab, setActiveTab] = useState('workspace');
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('salesclaw_onboarded'));
   const { user } = useAuth();
 
   const renderContent = () => {
-    switch (activeTab) {
-      case 'decision':
-        return <DecisionOverview />;
-      case 'ontology':
-        return <OntologyGraphView />;
-      case 'scenario':
-        return <ScenarioSim />;
-      case 'insights':
-        return <InsightEngine />;
-      case 'rules':
-        return <InferenceRulesPanel />;
-      case 'chat':
-        return <ChatInterface />;
-      default:
-        return <DecisionOverview />;
-    }
+    const content = (() => {
+      switch (activeTab) {
+        case 'workspace': return <DecisionOverview onTabChange={setActiveTab} />;
+        case 'ontology': return <OntologyGraphView />;
+        case 'insights': return <InsightEngine />;
+        case 'rules': return <InferenceRulesPanel />;
+        case 'scenario': return <ScenarioSim />;
+        case 'chat': return <ChatInterface />;
+        case 'tools': return <AIToolbox />;
+        default: return <DecisionOverview onTabChange={setActiveTab} />;
+      }
+    })();
+
+    return (
+      <Suspense fallback={
+        <div className="flex items-center justify-center h-full">
+          <div className="w-8 h-8 border-4 border-blue-300 border-t-blue-500 rounded-full animate-spin" />
+        </div>
+      }>
+        {content}
+      </Suspense>
+    );
   };
 
   const userId = user?.id || 'default_user';
 
   return (
     <OntologyProvider userId={userId}>
-      <Layout activeTab={activeTab} onTabChange={setActiveTab}>
+      <Layout activeTab={activeTab} onTabChange={setActiveTab} onNavigateToOntology={() => {}} onShowHelp={() => setShowOnboarding(true)}>
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -69,6 +79,15 @@ function DashboardContent() {
           </motion.div>
         </AnimatePresence>
       </Layout>
+      {showOnboarding && (
+        <OnboardingGuide onComplete={() => {
+          localStorage.setItem('salesclaw_onboarded', 'true');
+          setShowOnboarding(false);
+        }} onNavigate={(tab) => {
+          setActiveTab(tab);
+          setShowOnboarding(false);
+        }} />
+      )}
     </OntologyProvider>
   );
 }

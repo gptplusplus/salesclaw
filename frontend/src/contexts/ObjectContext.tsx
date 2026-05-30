@@ -24,6 +24,9 @@ type ObjectAction =
   | { type: 'EXECUTE_ACTION'; payload: { actionId: string; objectId: string; params: Record<string, any> } }
   | { type: 'APPROVE_ACTION'; payload: { actionId: string } }
   | { type: 'REJECT_ACTION'; payload: { actionId: string; reason?: string } }
+  | { type: 'EXECUTE_ACTION_ROLLBACK'; payload: { actionId: string } }
+  | { type: 'APPROVE_ACTION_ROLLBACK'; payload: { actionId: string; previousStatus: string } }
+  | { type: 'REJECT_ACTION_ROLLBACK'; payload: { actionId: string; previousStatus: string } }
   | { type: 'SELECT_OBJECT'; payload: { objectId: string | null } }
   | { type: 'ADD_NOTIFICATION'; payload: Notification }
   | { type: 'MARK_NOTIFICATION_READ'; payload: { notificationId: string } }
@@ -93,6 +96,31 @@ function objectReducer(state: ObjectState, action: ObjectAction): ObjectState {
       const updatedActions = state.actions.map(a => a.id === actionId ? { ...a, status: 'rejected' as const } : a);
       const newAuditLog: AuditLogEntry = { id: `al-${Date.now()}`, action: 'reject', entityType: 'ActionProposal', entityId: actionId, entityName: targetAction?.title || '', userId: 'current_user', timestamp: new Date().toISOString(), details: `拒绝动作提案，原因: ${reason || '未说明'}` };
       return { ...state, actions: updatedActions, auditLog: [newAuditLog, ...state.auditLog] };
+    }
+    case 'EXECUTE_ACTION_ROLLBACK': {
+      const { actionId } = action.payload;
+      return {
+        ...state,
+        objects: state.objects,
+        actions: state.actions.filter(a => a.id !== actionId),
+        error: 'Action execution failed',
+      };
+    }
+    case 'APPROVE_ACTION_ROLLBACK': {
+      const { actionId, previousStatus } = action.payload;
+      return {
+        ...state,
+        actions: state.actions.map(a => a.id === actionId ? { ...a, status: previousStatus as any } : a),
+        error: 'Action approval failed',
+      };
+    }
+    case 'REJECT_ACTION_ROLLBACK': {
+      const { actionId, previousStatus } = action.payload;
+      return {
+        ...state,
+        actions: state.actions.map(a => a.id === actionId ? { ...a, status: previousStatus as any } : a),
+        error: 'Action rejection failed',
+      };
     }
     case 'SELECT_OBJECT':
       return { ...state, selectedObjectId: action.payload.objectId };
@@ -173,29 +201,46 @@ export function ObjectProvider({ children, userId }: ObjectProviderProps) {
   useEffect(() => { refreshData(); }, [refreshData]);
 
   const executeAction = useCallback(async (actionId: string, objectId: string, params: Record<string, any> = {}) => {
-    dispatch({ type: 'SET_LOADING', payload: true });
+    const object = state.objects.find(o => o.id === objectId);
+    if (!object) return;
+
+    dispatch({ type: 'EXECUTE_ACTION', payload: { actionId, objectId, params } });
+
     try {
-      const object = state.objects.find(o => o.id === objectId);
-      if (object) {
-        const result = await apiClient.executeOntologyAction(object.objectType, objectId, actionId, params, userId);
-        if (result.success) { dispatch({ type: 'EXECUTE_ACTION', payload: { actionId, objectId, params } }); }
+      const result = await apiClient.executeOntologyAction(object.objectType, objectId, actionId, params, userId);
+      if (!result.success) {
+        dispatch({ type: 'EXECUTE_ACTION_ROLLBACK', payload: { actionId } });
       }
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Failed to execute action' });
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
+      dispatch({ type: 'EXECUTE_ACTION_ROLLBACK', payload: { actionId } });
     }
   }, [state.objects, userId]);
 
   const approveAction = useCallback(async (actionId: string) => {
-    try { await apiClient.approveAction(actionId, userId); dispatch({ type: 'APPROVE_ACTION', payload: { actionId } }); }
-    catch (error) { dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Failed to approve action' }); }
-  }, [userId]);
+    const targetAction = state.actions.find(a => a.id === actionId);
+    const previousStatus = targetAction?.status || 'pending';
+
+    dispatch({ type: 'APPROVE_ACTION', payload: { actionId } });
+
+    try {
+      await apiClient.approveAction(actionId, userId);
+    } catch (error) {
+      dispatch({ type: 'APPROVE_ACTION_ROLLBACK', payload: { actionId, previousStatus } });
+    }
+  }, [state.actions, userId]);
 
   const rejectAction = useCallback(async (actionId: string, reason?: string) => {
-    try { await apiClient.rejectAction(actionId, userId, reason); dispatch({ type: 'REJECT_ACTION', payload: { actionId, reason } }); }
-    catch (error) { dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Failed to reject action' }); }
-  }, [userId]);
+    const targetAction = state.actions.find(a => a.id === actionId);
+    const previousStatus = targetAction?.status || 'pending';
+
+    dispatch({ type: 'REJECT_ACTION', payload: { actionId, reason } });
+
+    try {
+      await apiClient.rejectAction(actionId, userId, reason);
+    } catch (error) {
+      dispatch({ type: 'REJECT_ACTION_ROLLBACK', payload: { actionId, previousStatus } });
+    }
+  }, [state.actions, userId]);
 
   const selectObject = useCallback((objectId: string | null) => { dispatch({ type: 'SELECT_OBJECT', payload: { objectId } }); }, []);
   const markNotificationRead = useCallback((notificationId: string) => { dispatch({ type: 'MARK_NOTIFICATION_READ', payload: { notificationId } }); apiClient.markNotificationRead(notificationId).catch(console.error); }, []);
@@ -209,7 +254,7 @@ export function ObjectProvider({ children, userId }: ObjectProviderProps) {
   const redo = useCallback(() => dispatch({ type: 'REDO' }), []);
 
   const searchObjects = useCallback(async (type: string, query: string): Promise<OntologyObject[]> => {
-    try { const result = await apiClient.searchOntologyObjects(type, query, userId); return result.results.map(mapApiObjectToOntologyObject); }
+    try { const result = await apiClient.searchOntologyObjects(type, query); return (Array.isArray(result) ? result : []).map(mapApiObjectToOntologyObject); }
     catch (error) { return []; }
   }, [userId]);
 

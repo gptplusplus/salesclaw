@@ -1,6 +1,9 @@
 import os
 import asyncio
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -9,6 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import create_tables, _get_engine
 from sqlalchemy.orm import sessionmaker
+from exceptions import SalesClawError, OntologyValidationError, ActionExecutionError, PermissionDeniedError
+from fastapi.responses import JSONResponse
 
 DEFAULT_ORIGINS = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,tauri://localhost,http://tauri.localhost,http://localhost:1420,http://localhost:1421,http://localhost:1422,http://localhost:1423,http://localhost:1424,http://0.0.0.0:5173"
 
@@ -41,7 +46,7 @@ async def periodic_risk_scan():
                 })
             db.close()
         except Exception as e:
-            print(f"Periodic scan error: {e}")
+            logger.warning("Periodic scan error: %s", e)
 
 
 @asynccontextmanager
@@ -55,6 +60,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SalesClaw API", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(SalesClawError)
+async def salesclaw_error_handler(request, exc):
+    status_code = 403 if isinstance(exc, PermissionDeniedError) else 400
+    return JSONResponse(status_code=status_code, content={"error": exc.message, "code": exc.code})
 
 allowed_origins_str = os.environ.get("ALLOWED_ORIGINS", DEFAULT_ORIGINS)
 allowed_cors_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]

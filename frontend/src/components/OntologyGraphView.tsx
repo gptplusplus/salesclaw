@@ -1,327 +1,111 @@
 import React, { useState } from 'react';
 import OntologyGraph from './OntologyGraph';
-import DoctorTimeline from './DoctorTimeline';
+import ObjectDetailPanel from './details';
 import { OntologyObject } from '../types';
-import { Activity, X, Filter, Search, ZoomIn, ZoomOut, Maximize2, Building2, Package, Target, Users, Calendar, TrendingUp, AlertCircle, BarChart3, MapPin, Phone, Mail, User } from 'lucide-react';
+import { Activity, X, Filter, Search, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOntologyContext } from '../contexts/OntologyContext';
 
-const ObjectDetailPanel: React.FC<{ selectedObject: OntologyObject }> = ({ selectedObject }) => {
-  const renderHospitalDetail = (obj: OntologyObject) => {
-    const props = obj.properties || {};
-    const timeSeriesData = obj.timeSeries?.dataPoints || [];
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Building2 size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">医院等级</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.level || '三级甲等'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <MapPin size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">地址</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.address || '上海市'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Users size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">医生数</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.doctorCount || obj.links.filter(l => l.targetType === 'Doctor').length || 0}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <TrendingUp size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">状态</span>
-            </div>
-            <div className={`text-sm font-medium ${obj.status === 'critical' ? 'text-rose-700' : obj.status === 'warning' ? 'text-amber-700' : 'text-emerald-400'}`}>
-              {obj.status === 'critical' ? '危急' : obj.status === 'warning' ? '警告' : '正常'}
-            </div>
-          </div>
-        </div>
+const DOMAIN_GROUPS = [
+  {
+    name: '核心域',
+    color: 'blue',
+    types: [
+      { value: 'Doctor', label: '医生' },
+      { value: 'Hospital', label: '医院' },
+      { value: 'Product', label: '产品' },
+      { value: 'SalesRep', label: '代表' },
+      { value: 'VisitRecord', label: '拜访记录' },
+      { value: 'SalesTarget', label: '销售目标' },
+      { value: 'ComplianceAlert', label: '合规告警' },
+      { value: 'AcademicEvent', label: '学术活动' },
+      { value: 'Territory', label: '区域' },
+      { value: 'RecoveryPlan', label: '恢复计划' },
+    ],
+  },
+  {
+    name: '收入目标管理',
+    color: 'emerald',
+    types: [
+      { value: 'SalesFlow', label: '销售流' },
+      { value: 'MarketPotential', label: '市场潜力' },
+      { value: 'HospitalDevelopment', label: '医院开发' },
+      { value: 'TerritoryPerformance', label: '区域绩效' },
+      { value: 'ProductFlow', label: '产品流' },
+    ],
+  },
+  {
+    name: '费用管理',
+    color: 'amber',
+    types: [
+      { value: 'BudgetCategory', label: '预算分类' },
+      { value: 'ExpenseClassification', label: '费用分类' },
+      { value: 'CostDriver', label: '成本驱动' },
+      { value: 'LaborPayment', label: '劳务支付' },
+      { value: 'ExpenseROI', label: '费用ROI' },
+    ],
+  },
+  {
+    name: '客户管理',
+    color: 'purple',
+    types: [
+      { value: 'CustomerCategory', label: '客户分类' },
+      { value: 'VisitFeedback', label: '拜访反馈' },
+      { value: 'PDCAPlan', label: 'PDCA计划' },
+      { value: 'HospitalStrategy', label: '医院策略' },
+      { value: 'DepartmentResearch', label: '科室调研' },
+    ],
+  },
+  {
+    name: '医学事务',
+    color: 'rose',
+    types: [
+      { value: 'RWSProject', label: 'RWS项目' },
+      { value: 'ClinicalTrial', label: '临床试验' },
+      { value: 'PatientProgram', label: '患者项目' },
+      { value: 'ResearchCollaboration', label: '科研合作' },
+    ],
+  },
+  {
+    name: '合规管理',
+    color: 'orange',
+    types: [
+      { value: 'MeetingCompliance', label: '会议合规' },
+      { value: 'ExpenseCompliance', label: '费用合规' },
+      { value: 'CustomerCompliance', label: '客户合规' },
+      { value: 'ComplianceRule', label: '合规规则' },
+    ],
+  },
+];
 
-        {timeSeriesData.length > 0 && (
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-2">
-              <BarChart3 size={16} className="text-gray-800" />
-              <span className="text-xs font-bold text-gray-800 uppercase">时序数据</span>
-            </div>
-            <div className="space-y-2">
-              {timeSeriesData.slice(-5).map((dp: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-800">{new Date(dp.timestamp).toLocaleDateString('zh-CN')}</span>
-                  <span className="font-medium text-gray-700">{dp.value?.toFixed?.(0) || dp.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+const TYPE_LABEL_MAP: Record<string, string> = {};
+DOMAIN_GROUPS.forEach(g => g.types.forEach(t => { TYPE_LABEL_MAP[t.value] = t.label; }));
 
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="text-xs font-bold text-gray-800 uppercase mb-2">关联关系 ({obj.links.length})</div>
-          <div className="space-y-1">
-            {obj.links.slice(0, 5).map((link, idx) => (
-              <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded border border-gray-100">
-                <span className="text-gray-600">{link.linkType}</span>
-                <span className="text-gray-800">{link.targetName || link.targetId}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
+const DOMAIN_COLOR_MAP: Record<string, string> = {
+  blue: 'text-blue-600',
+  emerald: 'text-emerald-600',
+  amber: 'text-amber-600',
+  purple: 'text-purple-600',
+  rose: 'text-rose-600',
+  orange: 'text-orange-600',
+};
 
-  const renderProductDetail = (obj: OntologyObject) => {
-    const props = obj.properties || {};
-    const timeSeriesData = obj.timeSeries?.dataPoints || [];
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Package size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">产品类型</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.type || obj.properties.category || '处方药'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <TrendingUp size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">生命周期</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{obj.lifecycleStage || '成熟期'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <BarChart3 size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">销售额</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">¥{props.salesVolume || props.revenue || '0'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <AlertCircle size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">状态</span>
-            </div>
-            <div className={`text-sm font-medium ${obj.status === 'critical' ? 'text-rose-700' : obj.status === 'warning' ? 'text-amber-700' : 'text-emerald-400'}`}>
-              {obj.status === 'critical' ? '危急' : obj.status === 'warning' ? '警告' : '正常'}
-            </div>
-          </div>
-        </div>
+const DOMAIN_BG_MAP: Record<string, string> = {
+  blue: 'bg-blue-50',
+  emerald: 'bg-emerald-50',
+  amber: 'bg-amber-50',
+  purple: 'bg-purple-50',
+  rose: 'bg-rose-50',
+  orange: 'bg-orange-50',
+};
 
-        {timeSeriesData.length > 0 && (
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-2">
-              <BarChart3 size={16} className="text-gray-800" />
-              <span className="text-xs font-bold text-gray-800 uppercase">销售趋势</span>
-            </div>
-            <div className="space-y-2">
-              {timeSeriesData.slice(-5).map((dp: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-800">{new Date(dp.timestamp).toLocaleDateString('zh-CN')}</span>
-                  <span className="font-medium text-gray-700">{dp.value?.toFixed?.(0) || dp.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="text-xs font-bold text-gray-800 uppercase mb-2">关联关系 ({obj.links.length})</div>
-          <div className="space-y-1">
-            {obj.links.slice(0, 5).map((link, idx) => (
-              <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded border border-gray-100">
-                <span className="text-gray-600">{link.linkType}</span>
-                <span className="text-gray-800">{link.targetName || link.targetId}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderSalesTargetDetail = (obj: OntologyObject) => {
-    const props = obj.properties || {};
-    const timeSeriesData = obj.timeSeries?.dataPoints || [];
-    const achievementRate = props.achievementRate || props.currentValue / props.targetValue * 100 || 0;
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Target size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">目标金额</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">¥{props.targetValue?.toLocaleString() || '1,000,000'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <TrendingUp size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">当前完成</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">¥{props.currentValue?.toLocaleString() || '833,000'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <BarChart3 size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">达成率</span>
-            </div>
-            <div className={`text-sm font-bold ${achievementRate >= 100 ? 'text-emerald-400' : achievementRate >= 80 ? 'text-amber-700' : 'text-rose-700'}`}>
-              {achievementRate.toFixed(1)}%
-            </div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Calendar size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">周期</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.period || 'Q1 2026'}</div>
-          </div>
-        </div>
-
-        {timeSeriesData.length > 0 && (
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-2">
-              <BarChart3 size={16} className="text-gray-800" />
-              <span className="text-xs font-bold text-gray-800 uppercase">完成进度</span>
-            </div>
-            <div className="space-y-2">
-              {timeSeriesData.slice(-5).map((dp: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-800">{new Date(dp.timestamp).toLocaleDateString('zh-CN')}</span>
-                  <span className="font-medium text-gray-700">{dp.value?.toFixed?.(0) || dp.value}%</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="text-xs font-bold text-gray-800 uppercase mb-2">关联关系 ({obj.links.length})</div>
-          <div className="space-y-1">
-            {obj.links.slice(0, 5).map((link, idx) => (
-              <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded border border-gray-100">
-                <span className="text-gray-600">{link.linkType}</span>
-                <span className="text-gray-800">{link.targetName || link.targetId}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderSalesRepDetail = (obj: OntologyObject) => {
-    const props = obj.properties || {};
-    const timeSeriesData = obj.timeSeries?.dataPoints || [];
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <User size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">职位</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.position || '销售代表'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <MapPin size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">负责区域</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.territory || props.region || '未分配'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Phone size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">电话</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700">{props.phone || '未设置'}</div>
-          </div>
-          <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-1">
-              <Mail size={14} className="text-gray-800" />
-              <span className="text-xs text-gray-800">邮箱</span>
-            </div>
-            <div className="text-sm font-medium text-gray-700 truncate">{props.email || '未设置'}</div>
-          </div>
-        </div>
-
-        {timeSeriesData.length > 0 && (
-          <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-            <div className="flex items-center space-x-2 mb-2">
-              <BarChart3 size={16} className="text-gray-800" />
-              <span className="text-xs font-bold text-gray-800 uppercase">业绩趋势</span>
-            </div>
-            <div className="space-y-2">
-              {timeSeriesData.slice(-5).map((dp: any, idx: number) => (
-                <div key={idx} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-800">{new Date(dp.timestamp).toLocaleDateString('zh-CN')}</span>
-                  <span className="font-medium text-gray-700">{dp.value?.toFixed?.(0) || dp.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="text-xs font-bold text-gray-800 uppercase mb-2">关联关系 ({obj.links.length})</div>
-          <div className="space-y-1">
-            {obj.links.slice(0, 5).map((link, idx) => (
-              <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded border border-gray-100">
-                <span className="text-gray-600">{link.linkType}</span>
-                <span className="text-gray-800">{link.targetName || link.targetId}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  switch (selectedObject.objectType) {
-    case 'Doctor':
-      return <DoctorTimeline doctorId={selectedObject.id} />;
-    case 'Hospital':
-      return renderHospitalDetail(selectedObject);
-    case 'Product':
-      return renderProductDetail(selectedObject);
-    case 'SalesTarget':
-      return renderSalesTargetDetail(selectedObject);
-    case 'SalesRep':
-      return renderSalesRepDetail(selectedObject);
-    default:
-      return (
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
-          <div className="text-xs font-bold text-gray-800 uppercase mb-2">基本信息</div>
-          <div className="space-y-2">
-            <div className="text-sm text-gray-600">类型: {selectedObject.objectType}</div>
-            <div className="text-sm text-gray-600">状态: {selectedObject.status || 'normal'}</div>
-            {selectedObject.lifecycleStage && (
-              <div className="text-sm text-gray-600">生命周期: {selectedObject.lifecycleStage}</div>
-            )}
-          </div>
-          <div className="mt-4">
-            <div className="text-xs font-bold text-gray-800 uppercase mb-2">关联关系 ({selectedObject.links.length})</div>
-            <div className="space-y-1">
-              {selectedObject.links.slice(0, 5).map((link, idx) => (
-                <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded border border-gray-100">
-                  <span className="text-gray-600">{link.linkType}</span>
-                  <span className="text-gray-800">{link.targetName || link.targetId}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-  }
+const DOMAIN_DOT_MAP: Record<string, string> = {
+  blue: 'bg-blue-400',
+  emerald: 'bg-emerald-400',
+  amber: 'bg-amber-400',
+  purple: 'bg-purple-400',
+  rose: 'bg-rose-400',
+  orange: 'bg-orange-400',
 };
 
 const OntologyGraphView: React.FC = () => {
@@ -359,11 +143,6 @@ const OntologyGraphView: React.FC = () => {
     }
     return result;
   }, [state.objects, filterType, searchQuery]);
-
-  const objectTypes = React.useMemo(() => {
-    const types = new Set(state.objects.map(o => o.objectType));
-    return Array.from(types).sort();
-  }, [state.objects]);
 
   const handleZoomIn = () => {
     setZoomLevel(prev => Math.min(prev + 0.2, 3));
@@ -422,22 +201,30 @@ const OntologyGraphView: React.FC = () => {
                     <Filter size={18} />
                   </button>
                   {showFilter && (
-                    <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden">
-                      <div className="p-2">
+                    <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+                      <div className="p-2 max-h-80 overflow-y-auto">
                         <button
                           onClick={() => { setFilterType('all'); setShowFilter(false); }}
                           className={`w-full text-left px-3 py-2 text-xs rounded-lg transition-colors ${filterType === 'all' ? 'bg-brand-500/10 text-brand-400 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
                         >
                           全部类型
                         </button>
-                        {objectTypes.map(type => (
-                          <button
-                            key={type}
-                            onClick={() => { setFilterType(type); setShowFilter(false); }}
-                            className={`w-full text-left px-3 py-2 text-xs rounded-lg transition-colors ${filterType === type ? 'bg-brand-500/10 text-brand-400 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
-                          >
-                            {type}
-                          </button>
+                        {DOMAIN_GROUPS.map(group => (
+                          <div key={group.name}>
+                            <div className={`flex items-center gap-1.5 px-3 py-1.5 mt-1.5 mb-0.5 rounded-md ${DOMAIN_BG_MAP[group.color] || 'bg-gray-50'}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${DOMAIN_DOT_MAP[group.color] || 'bg-gray-400'}`}></span>
+                              <span className={`text-[10px] font-semibold uppercase tracking-wider ${DOMAIN_COLOR_MAP[group.color] || 'text-gray-600'}`}>{group.name}</span>
+                            </div>
+                            {group.types.map(t => (
+                              <button
+                                key={t.value}
+                                onClick={() => { setFilterType(t.value); setShowFilter(false); }}
+                                className={`w-full text-left px-3 py-1.5 text-xs rounded-lg transition-colors pl-6 ${filterType === t.value ? 'bg-brand-500/10 text-brand-400 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                              >
+                                {t.label}
+                              </button>
+                            ))}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -487,7 +274,7 @@ const OntologyGraphView: React.FC = () => {
                 {searchQuery && (
                   <div className="mt-1 text-xs text-gray-800">
                     找到 {filteredObjects.length} 个匹配节点
-                    {filterType !== 'all' && ` (筛选: ${filterType})`}
+                    {filterType !== 'all' && ` (筛选: ${TYPE_LABEL_MAP[filterType] || filterType})`}
                   </div>
                 )}
               </div>
@@ -497,7 +284,7 @@ const OntologyGraphView: React.FC = () => {
               <div className="mt-3 flex items-center gap-2">
                 {filterType !== 'all' && (
                   <span className="text-xs px-2 py-1 bg-brand-500/10 text-brand-400 rounded-md border border-brand-500/20 flex items-center gap-1">
-                    筛选: {filterType}
+                    筛选: {TYPE_LABEL_MAP[filterType] || filterType}
                     <button onClick={() => setFilterType('all')} className="hover:text-brand-600">
                       <X size={10} />
                     </button>

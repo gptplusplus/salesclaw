@@ -1,9 +1,12 @@
 import json
+import logging
 import asyncio
 from typing import Dict, Any, List, Callable, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class EventType(str, Enum):
@@ -29,7 +32,7 @@ class OntologyEvent:
     object_type: Optional[str] = None
     object_name: Optional[str] = None
     data: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     source: str = "system"
 
 
@@ -111,6 +114,29 @@ class EventBus:
 event_bus = EventBus()
 
 
+def _persist_event(event_type: str, data: dict):
+    try:
+        from database import _get_engine
+        from sqlalchemy import text
+        engine = _get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ontology_events_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    event_data TEXT,
+                    timestamp TEXT NOT NULL
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO ontology_events_log (event_type, event_data, timestamp)
+                VALUES (:type, :data, :ts)
+            """), {"type": event_type, "data": json.dumps(data, default=str), "ts": datetime.now(timezone.utc).isoformat()})
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"Event persist failed: {e}")
+
+
 def publish_ontology_event(event_type: EventType, object_id: str = None,
                            object_type: str = None, object_name: str = None,
                            data: Dict[str, Any] = None, source: str = "system"):
@@ -123,4 +149,14 @@ def publish_ontology_event(event_type: EventType, object_id: str = None,
         source=source,
     )
     event_bus.publish(event)
+    _persist_event(
+        event_type.value if isinstance(event_type, EventType) else str(event_type),
+        {
+            "object_id": object_id,
+            "object_type": object_type,
+            "object_name": object_name,
+            "data": data or {},
+            "source": source,
+        },
+    )
     return event

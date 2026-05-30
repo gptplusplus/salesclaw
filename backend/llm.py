@@ -1,9 +1,21 @@
 import os
+import logging
 from typing import Optional, AsyncGenerator
 from functools import lru_cache
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
+
+logger = logging.getLogger(__name__)
+
+
+def estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, len(text) // 3)
+
+
+MAX_CONTEXT_TOKENS = int(os.environ.get("LLM_MAX_CONTEXT_TOKENS", "8000"))
 
 
 @lru_cache(maxsize=1)
@@ -26,7 +38,6 @@ def get_llm_client():
 
 
 def _get_llm():
-    """内部函数，保持向后兼容"""
     return get_llm_client()
 
 
@@ -47,7 +58,7 @@ async def chat_with_llm(messages: list, system_prompt: str) -> Optional[str]:
         response = await llm.ainvoke(full_messages)
         return response.content
     except Exception as e:
-        print(f"LLM call failed: {e}")
+        logger.warning("LLM call failed: %s", e)
     return None
 
 
@@ -69,7 +80,7 @@ async def chat_with_llm_stream(
             if chunk.content:
                 yield "content", chunk.content
     except Exception as e:
-        print(f"LLM stream call failed: {e}")
+        logger.warning("LLM stream call failed: %s", e)
 
 
 async def chat_with_llm_stream_with_thinking(
@@ -94,7 +105,7 @@ async def chat_with_llm_stream_with_thinking(
                 if reasoning:
                     yield "thinking", reasoning
     except Exception as e:
-        print(f"LLM stream with thinking call failed: {e}")
+        logger.warning("LLM stream with thinking call failed: %s", e)
 
 
 def build_system_prompt(data_summary: str) -> str:

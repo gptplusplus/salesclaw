@@ -1,6 +1,7 @@
 import uuid
 import re
 import asyncio
+import logging
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -8,8 +9,10 @@ from models.chat import ChatThread, ChatMessage
 from models.ontology import OntologyObject, TimeSeriesData, ObjectEvent, ObjectLink
 from models.domain import Doctor, Hospital, Product, SalesTarget, ComplianceAlert, BudgetCategory, ExpenseROI
 from models.action import ActionProposal
-from llm import is_llm_configured, chat_with_llm, build_system_prompt
+from llm import is_llm_configured, chat_with_llm, build_system_prompt, estimate_tokens
 from services.ontology_context import build_ontology_context_for_query, format_context_for_llm
+
+logger = logging.getLogger(__name__)
 
 
 def _get_recent_time_series(db: Session, object_id: str, series_name: str, limit: int = 3) -> List:
@@ -53,11 +56,18 @@ def save_message(db: Session, thread_id: str, role: str, content: str) -> ChatMe
     return msg
 
 
-def _get_thread_messages(db: Session, thread_id: str, limit: int = 10) -> List[dict]:
+def _get_thread_messages(db: Session, thread_id: str, limit: int = 20, max_tokens: int = 6000) -> List[dict]:
     messages = db.query(ChatMessage).filter(
         ChatMessage.thread_id == thread_id,
     ).order_by(ChatMessage.timestamp.desc()).limit(limit).all()
-    return [{"role": m.role, "content": m.content} for m in reversed(messages)]
+    result = [{"role": m.role, "content": m.content} for m in reversed(messages)]
+
+    total_tokens = sum(estimate_tokens(m["content"]) for m in result)
+    while total_tokens > max_tokens and len(result) > 1:
+        removed = result.pop(0)
+        total_tokens -= estimate_tokens(removed["content"])
+
+    return result
 
 
 def _get_data_summary(db: Session) -> str:
@@ -81,8 +91,8 @@ def _get_data_summary(db: Session) -> str:
         if targets:
             avg_rate = sum(t.achievement_rate or 0 for t in targets) / len(targets)
             parts.append(f"平均销售达成率: {avg_rate:.1f}%")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Data summary generation failed: {e}")
     return "\n".join(parts)
 
 
@@ -98,8 +108,8 @@ async def generate_response_with_llm(db: Session, message: str, thread_id: Optio
         if oag_context.get("contexts"):
             oag_text = format_context_for_llm(oag_context)
             system_prompt += f"\n\n## Ontology 上下文\n{oag_text}"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"OAG context build failed: {e}")
 
     messages = []
     if thread_id:
@@ -147,31 +157,18 @@ def _get_entity_by_name(db: Session, message: str) -> Optional[str]:
             ).all()
             if objects:
                 obj = objects[0]
-                details = []
                 if obj_type == 'Doctor':
                     doctor = db.query(Doctor).filter(Doctor.id == obj.id).first()
                     if doctor:
-                        details = [
-                            f"{obj.name}（{doctor.department or ''} {doctor.title or ''}）",
-                            f"近3个月处方量从{getattr(doctor, 'prescription_volume', 'N/A')}",
-                            f"影响力评分: {doctor.influence_score or 'N/A'}",
-                        ]
+                        return _build_doctor_narrative(db, doctor, obj)
                 elif obj_type == 'Hospital':
                     hospital = db.query(Hospital).filter(Hospital.id == obj.id).first()
                     if hospital:
-                        details = [
-                            f"{obj.name}（{getattr(hospital, 'level', '')}）",
-                            f"地址: {getattr(hospital, 'address', '未设置')}",
-                        ]
+                        return _build_hospital_narrative(db, hospital, obj)
                 elif obj_type == 'Product':
                     product = db.query(Product).filter(Product.id == obj.id).first()
                     if product:
-                        details = [
-                            f"{obj.name}",
-                            f"市场份额: {product.market_share or 'N/A'}%",
-                        ]
-                if details:
-                    return "，".join(details)
+                        return _build_product_narrative(db, product, obj)
     return None
 
 
@@ -248,8 +245,8 @@ def _get_data_context(db: Session, topic: str) -> Optional[str]:
                     lines.append(f"{status} {name}: {rate}%")
                 avg_rate = sum(t.achievement_rate or 0 for t in targets) / len(targets)
                 return "销售目标概况：\n" + "\n".join(lines) + f"\n\n平均达成率: {avg_rate:.1f}%"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Data context retrieval failed for topic '{topic}': {e}")
     return None
 
 
@@ -284,7 +281,7 @@ def _invoke_agent_sync(message: str) -> Optional[dict]:
             "pending_action_id": final_state.get("pending_action_id"),
         }
     except Exception as e:
-        print(f"Agent invocation failed: {e}")
+        logger.warning(f"Agent invocation failed: {e}")
         return None
 
 
@@ -396,40 +393,6 @@ def _build_product_narrative(db: Session, product: Product, obj: OntologyObject)
 def generate_response(db: Session, message: str) -> str:
     entity_info = _get_entity_by_name(db, message)
     if entity_info:
-        for kw, obj_type in ENTITY_KEYWORDS.items():
-            if kw in message:
-                if obj_type == "Doctor":
-                    objects = db.query(OntologyObject).filter(
-                        OntologyObject.object_type == "Doctor",
-                        OntologyObject.name.ilike(f"%{kw}%")
-                    ).all()
-                    if objects:
-                        obj = objects[0]
-                        doctor = db.query(Doctor).filter(Doctor.id == obj.id).first()
-                        if doctor:
-                            return _build_doctor_narrative(db, doctor, obj)
-                elif obj_type == "Hospital":
-                    objects = db.query(OntologyObject).filter(
-                        OntologyObject.object_type == "Hospital",
-                        OntologyObject.name.ilike(f"%{kw.replace('医院', '')}%")
-                    ).all()
-                    if objects:
-                        obj = objects[0]
-                        hospital = db.query(Hospital).filter(Hospital.id == obj.id).first()
-                        if hospital:
-                            return _build_hospital_narrative(db, hospital, obj)
-                elif obj_type == "Product":
-                    objects = db.query(OntologyObject).filter(
-                        OntologyObject.object_type == "Product",
-                        OntologyObject.name.ilike(f"%{kw.replace('产品', '')}%")
-                    ).all()
-                    if objects:
-                        obj = objects[0]
-                        product = db.query(Product).filter(Product.id == obj.id).first()
-                        if product:
-                            return _build_product_narrative(db, product, obj)
-                break
-
         return entity_info
 
     for keyword, topic in TOPIC_KEYWORDS.items():

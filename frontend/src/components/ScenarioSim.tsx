@@ -7,6 +7,7 @@ import { DecisionRecommendationEngine } from '../decision/DecisionRecommendation
 import { CounterfactualReasoningEngine, WhatIfScenario, CounterfactualResult, SensitivityResult, Alternative, ComparisonResult } from '../inference/CounterfactualReasoningEngine';
 import { useScenarios } from '../api/hooks';
 import { useOntologyContext } from '../contexts/OntologyContext';
+import PageHeader from './PageHeader';
 
 const SCENARIO_CATEGORIES = [
   { id: 'sales_strategy', name: '销售策略', icon: TrendingUp },
@@ -41,7 +42,8 @@ const ScenarioSim: React.FC = () => {
   const { refreshData } = useOntologyContext();
   const [selectedScenario, setSelectedScenario] = useState<EnhancedScenario | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('sales_strategy');
-  const [activeTab, setActiveTab] = useState<'simulation' | 'decision' | 'counterfactual'>('simulation');
+  const [activeTab, setActiveTab] = useState<'simulation' | 'advanced'>('simulation');
+  const [advancedMode, setAdvancedMode] = useState<'decision' | 'counterfactual'>('decision');
   const [generatedDecision, setGeneratedDecision] = useState<DecisionScenario | null>(null);
   const [selectedPath, setSelectedPath] = useState<DecisionPath | null>(null);
   const [showReasoningChain, setShowReasoningChain] = useState(false);
@@ -223,7 +225,8 @@ const ScenarioSim: React.FC = () => {
     setGeneratedDecision(decision);
     const recommendation = recommendationEngine.generateRecommendation(decision);
     setDecisionRecommendation(recommendation);
-    setActiveTab('decision');
+    setActiveTab('advanced');
+    setAdvancedMode('decision');
   };
 
   const getCategoryIcon = (categoryId: string) => {
@@ -382,20 +385,19 @@ const ScenarioSim: React.FC = () => {
   }, [counterfactualEngine]);
 
   useEffect(() => {
-    if (selectedScenario && activeTab === 'counterfactual') {
+    if (selectedScenario && activeTab === 'advanced' && advancedMode === 'counterfactual') {
       runCounterfactualAnalysis(selectedScenario);
     }
-  }, [selectedScenario, activeTab, runCounterfactualAnalysis]);
+  }, [selectedScenario, activeTab, advancedMode, runCounterfactualAnalysis]);
 
   return (
     <div className="flex flex-col h-full space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-700 flex items-center">
-          <TrendingUp className="mr-3 text-brand-400" />
-          What-If 场景模拟
-        </h2>
-        <p className="text-gray-800 mt-1">在数字孪生中模拟业务决策的影响，推演决策路径</p>
-      </div>
+      <PageHeader
+        icon={<TrendingUp className="text-brand-400" size={22} />}
+        title="场景推演"
+        description="模拟业务决策的影响，推演不同执行路径"
+        detail="选择一个业务场景，调整参数模拟不同决策对业务指标的影响。高级功能包括决策推演路径和反事实分析。"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {SCENARIO_CATEGORIES.map(category => (
@@ -485,31 +487,17 @@ const ScenarioSim: React.FC = () => {
                   场景模拟
                 </button>
                 <button
-                  onClick={() => setActiveTab('decision')}
+                  onClick={() => setActiveTab('advanced')}
                   className={`px-4 py-2 text-sm font-medium transition-colors ${
-                    activeTab === 'decision'
-                      ? 'text-brand-400 border-b-2 border-brand-500'
-                      : 'text-gray-800 hover:text-gray-600'
-                  }`}
-                >
-                  <GitBranch size={16} className="inline mr-1" />
-                  决策推演
-                  {generatedDecision && (
-                    <span className="ml-1 text-xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded-full">新</span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setActiveTab('counterfactual')}
-                  className={`px-4 py-2 text-sm font-medium transition-colors ${
-                    activeTab === 'counterfactual'
+                    activeTab === 'advanced'
                       ? 'text-brand-400 border-b-2 border-brand-500'
                       : 'text-gray-800 hover:text-gray-600'
                   }`}
                 >
                   <Zap size={16} className="inline mr-1" />
-                  反事实分析
-                  {counterfactualResult && (
-                    <span className="ml-1 text-xs bg-white0/10 text-purple-400 px-1.5 py-0.5 rounded-full">AI</span>
+                  高级分析
+                  {(generatedDecision || counterfactualResult) && (
+                    <span className="ml-1 text-xs bg-brand-500/10 text-brand-400 px-1.5 py-0.5 rounded-full">新</span>
                   )}
                 </button>
               </div>
@@ -622,392 +610,411 @@ const ScenarioSim: React.FC = () => {
                       )}
                     </div>
                   </motion.div>
-                ) : activeTab === 'decision' ? (
+                ) : activeTab === 'advanced' ? (
                   <motion.div
-                    key="decision"
+                    key="advanced"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     className="space-y-4"
                   >
-                    {generatedDecision ? (
+                    <div className="flex space-x-2 bg-gray-50 p-1 rounded-lg">
+                      <button
+                        onClick={() => setAdvancedMode('decision')}
+                        className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                          advancedMode === 'decision' ? 'bg-white shadow-sm text-brand-400' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <GitBranch size={14} className="inline mr-1" />
+                        决策推演
+                      </button>
+                      <button
+                        onClick={() => setAdvancedMode('counterfactual')}
+                        className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                          advancedMode === 'counterfactual' ? 'bg-white shadow-sm text-brand-400' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <Zap size={14} className="inline mr-1" />
+                        反事实分析
+                      </button>
+                    </div>
+
+                    {advancedMode === 'decision' ? (
                       <>
-                        <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                          <div className="flex items-center gap-2 mb-2">
-                            <BrainCircuit size={20} className="text-gray-800" />
-                            <span className="font-semibold text-gray-700">{generatedDecision.name}</span>
-                          </div>
-                          <p className="text-sm text-gray-800">{generatedDecision.description}</p>
-                          <div className="flex items-center gap-4 mt-3 text-xs">
-                            <span className="text-gray-800">置信度: <span className="text-brand-400 font-medium">{(generatedDecision.confidence * 100).toFixed(0)}%</span></span>
-                            <span className="text-gray-800">紧急度: <span className="text-orange-700 font-medium">{generatedDecision.context.metadata.urgency}/100</span></span>
-                            <span className="text-gray-800">重要性: <span className="text-emerald-400 font-medium">{generatedDecision.context.metadata.importance}/100</span></span>
-                          </div>
-                        </div>
-
-                        {decisionRecommendation && (
-                          <div className="bg-gradient-to-r from-brand-500/10 to-purple-500/10 rounded-xl p-4 border border-brand-500/20">
-                            <div className="flex items-center gap-2 mb-3">
-                              <Sparkles size={18} className="text-purple-400" />
-                              <span className="font-semibold text-gray-700">AI 决策推荐</span>
-                              <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-white0/10 text-emerald-400">
-                                置信度 {(decisionRecommendation.confidence * 100).toFixed(0)}%
-                              </span>
-                            </div>
-
-                            <div className="bg-white rounded-lg p-3 mb-3">
-                              <div className="text-sm font-medium text-gray-700 mb-1">
-                                推荐方案: {decisionRecommendation.recommendedAlternative?.name}
+                        {generatedDecision ? (
+                          <>
+                            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                              <div className="flex items-center gap-2 mb-2">
+                                <BrainCircuit size={20} className="text-gray-800" />
+                                <span className="font-semibold text-gray-700">{generatedDecision.name}</span>
                               </div>
-                              <p className="text-xs text-gray-800">
-                                {decisionRecommendation.recommendedAlternative?.description}
-                              </p>
-                            </div>
-
-                            <div className="grid grid-cols-3 gap-3">
-                              <div className="bg-white0/10 rounded p-2 text-center">
-                                <div className="text-xs text-emerald-400">预期收益</div>
-                                <div className="text-sm font-bold text-emerald-400">
-                                  ¥{(decisionRecommendation.expectedImpact?.financial?.revenue / 10000 || 0).toFixed(0)}万
-                                </div>
-                              </div>
-                              <div className="bg-brand-500/10 rounded p-2 text-center">
-                                <div className="text-xs text-brand-400">ROI</div>
-                                <div className="text-sm font-bold text-brand-400">
-                                  {(decisionRecommendation.expectedImpact?.financial?.roi || 0) * 100}%
-                                </div>
-                              </div>
-                              <div className="bg-white0/10 rounded p-2 text-center">
-                                <div className="text-xs text-purple-400">实施周期</div>
-                                <div className="text-sm font-bold text-purple-400">
-                                  {(decisionRecommendation.implementationPlan || []).reduce((sum: number, s: any) => sum + (s.duration || 0), 0)}天
-                                </div>
+                              <p className="text-sm text-gray-800">{generatedDecision.description}</p>
+                              <div className="flex items-center gap-4 mt-3 text-xs">
+                                <span className="text-gray-800">置信度: <span className="text-brand-400 font-medium">{(generatedDecision.confidence * 100).toFixed(0)}%</span></span>
+                                <span className="text-gray-800">紧急度: <span className="text-orange-700 font-medium">{generatedDecision.context.metadata.urgency}/100</span></span>
+                                <span className="text-gray-800">重要性: <span className="text-emerald-400 font-medium">{generatedDecision.context.metadata.importance}/100</span></span>
                               </div>
                             </div>
-                          </div>
-                        )}
 
-                        <div>
-                          <h4 className="text-sm font-bold text-gray-600 mb-3 flex items-center gap-2">
-                            <GitBranch size={16} />
-                            选择执行路径
-                          </h4>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            {decisionPaths.map((path) => (
+                            {decisionRecommendation && (
+                              <div className="bg-gradient-to-r from-brand-500/10 to-purple-500/10 rounded-xl p-4 border border-brand-500/20">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Sparkles size={18} className="text-purple-400" />
+                                  <span className="font-semibold text-gray-700">AI 决策推荐</span>
+                                  <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-white0/10 text-emerald-400">
+                                    置信度 {(decisionRecommendation.confidence * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+
+                                <div className="bg-white rounded-lg p-3 mb-3">
+                                  <div className="text-sm font-medium text-gray-700 mb-1">
+                                    推荐方案: {decisionRecommendation.recommendedAlternative?.name}
+                                  </div>
+                                  <p className="text-xs text-gray-800">
+                                    {decisionRecommendation.recommendedAlternative?.description}
+                                  </p>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-3">
+                                  <div className="bg-white0/10 rounded p-2 text-center">
+                                    <div className="text-xs text-emerald-400">预期收益</div>
+                                    <div className="text-sm font-bold text-emerald-400">
+                                      ¥{(decisionRecommendation.expectedImpact?.financial?.revenue / 10000 || 0).toFixed(0)}万
+                                    </div>
+                                  </div>
+                                  <div className="bg-brand-500/10 rounded p-2 text-center">
+                                    <div className="text-xs text-brand-400">ROI</div>
+                                    <div className="text-sm font-bold text-brand-400">
+                                      {(decisionRecommendation.expectedImpact?.financial?.roi || 0) * 100}%
+                                    </div>
+                                  </div>
+                                  <div className="bg-white0/10 rounded p-2 text-center">
+                                    <div className="text-xs text-purple-400">实施周期</div>
+                                    <div className="text-sm font-bold text-purple-400">
+                                      {(decisionRecommendation.implementationPlan || []).reduce((sum: number, s: any) => sum + (s.duration || 0), 0)}天
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            <div>
+                              <h4 className="text-sm font-bold text-gray-600 mb-3 flex items-center gap-2">
+                                <GitBranch size={16} />
+                                选择执行路径
+                              </h4>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {decisionPaths.map((path) => (
+                                  <motion.div
+                                    key={path.id}
+                                    whileHover={{ scale: 1.02 }}
+                                    onClick={() => setSelectedPath(path)}
+                                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                      selectedPath?.id === path.id
+                                        ? 'border-brand-500 bg-brand-500/5'
+                                        : 'border-gray-100 bg-white hover:border-gray-100'
+                                    }`}
+                                  >
+                                    <div className="font-medium text-gray-700 mb-1">{path.name}</div>
+                                    <p className="text-xs text-gray-800 mb-3">{path.description}</p>
+                                    <div className="space-y-2">
+                                      <div className="flex justify-between text-xs">
+                                        <span className="text-gray-800">周期</span>
+                                        <span className="font-medium">{path.totalDuration}天</span>
+                                      </div>
+                                      <div className="flex justify-between text-xs">
+                                        <span className="text-gray-800">成功率</span>
+                                        <span className={`font-medium ${path.successProbability >= 0.8 ? 'text-emerald-400' : 'text-amber-700'}`}>
+                                          {(path.successProbability * 100).toFixed(0)}%
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between text-xs">
+                                        <span className="text-gray-800">预期ROI</span>
+                                        <span className="font-medium text-emerald-400">{path.expectedRoi}x</span>
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {selectedPath && (
                               <motion.div
-                                key={path.id}
-                                whileHover={{ scale: 1.02 }}
-                                onClick={() => setSelectedPath(path)}
-                                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                                  selectedPath?.id === path.id
-                                    ? 'border-brand-500 bg-brand-500/5'
-                                    : 'border-gray-100 bg-white hover:border-gray-100'
-                                }`}
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                className="bg-white rounded-xl border border-gray-100 p-4"
                               >
-                                <div className="font-medium text-gray-700 mb-1">{path.name}</div>
-                                <p className="text-xs text-gray-800 mb-3">{path.description}</p>
-                                <div className="space-y-2">
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-gray-800">周期</span>
-                                    <span className="font-medium">{path.totalDuration}天</span>
+                                <div className="flex items-center justify-between mb-4">
+                                  <h4 className="font-semibold text-gray-700">{selectedPath.name} - 执行步骤</h4>
+                                  <button
+                                    onClick={() => setShowReasoningChain(!showReasoningChain)}
+                                    className="text-xs text-brand-400 hover:underline"
+                                  >
+                                    {showReasoningChain ? '隐藏推理链' : '查看推理链'}
+                                  </button>
+                                </div>
+
+                                <div className="relative">
+                                  <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-white/10"></div>
+
+                                  <div className="space-y-4">
+                                    {selectedPath.steps.map((step, index) => (
+                                      <div key={step.id} className="relative pl-10">
+                                        <div className={`absolute left-2 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                                          index === 0 ? 'bg-brand-500 border-brand-500' :
+                                          index === selectedPath.steps.length - 1 ? 'bg-green-500 border-green-500' :
+                                          'bg-white border-gray-100'
+                                        }`}>
+                                          <span className="text-[10px] text-gray-800 font-bold">{step.order}</span>
+                                        </div>
+
+                                        <div className="bg-gray-50 rounded-lg p-3">
+                                          <div className="flex items-center justify-between mb-1">
+                                            <span className="font-medium text-gray-700">{step.name}</span>
+                                            <span className="text-xs text-gray-800">{step.duration}天</span>
+                                          </div>
+                                          <p className="text-xs text-gray-800 mb-2">{step.description}</p>
+                                          <div className="flex items-center gap-2 text-xs">
+                                            <span className="text-gray-800">负责人:</span>
+                                            <span className="text-gray-600">{step.responsible}</span>
+                                          </div>
+                                          <div className="flex items-center gap-2 text-xs mt-1">
+                                            <span className="text-gray-800">预期成果:</span>
+                                            <span className="text-emerald-400">{step.expectedOutcome}</span>
+                                          </div>
+
+                                          {showReasoningChain && (
+                                            <div className="mt-2 pt-2 border-t border-gray-100">
+                                              <div className="text-[10px] text-gray-800">
+                                                推理依据: 基于历史数据分析，此步骤对整体成功率贡献度为
+                                                {((1 / selectedPath.steps.length) * 100).toFixed(0)}%
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-gray-800">成功率</span>
-                                    <span className={`font-medium ${path.successProbability >= 0.8 ? 'text-emerald-400' : 'text-amber-700'}`}>
-                                      {(path.successProbability * 100).toFixed(0)}%
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-gray-800">预期ROI</span>
-                                    <span className="font-medium text-emerald-400">{path.expectedRoi}x</span>
-                                  </div>
+                                </div>
+
+                                <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-2">
+                                  <button
+                                    onClick={() => setSelectedPath(null)}
+                                    className="px-4 py-2 text-gray-800 hover:bg-gray-50 rounded-lg transition-colors text-sm"
+                                  >
+                                    重新选择
+                                  </button>
+                                  <button className="px-4 py-2 bg-white0 text-white rounded-lg hover:bg-emerald-600 transition-colors text-sm flex items-center gap-2">
+                                    <Target size={16} />
+                                    确认执行此路径
+                                  </button>
                                 </div>
                               </motion.div>
-                            ))}
+                            )}
+                          </>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border border-gray-100 text-gray-800">
+                            <GitBranch size={48} className="mb-2 text-gray-800" />
+                            <p className="text-sm">先在"场景模拟"标签页生成决策推演</p>
                           </div>
-                        </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {isAnalyzing ? (
+                          <div className="flex flex-col items-center justify-center h-64 bg-gradient-to-br from-purple-500/10 to-brand-500/10 rounded-xl border border-purple-500/20">
+                            <div className="animate-spin w-12 h-12 border-4 border-purple-500/20 border-t-purple-600 rounded-full mb-4"></div>
+                            <p className="text-sm text-purple-400 font-medium">正在进行反事实推理分析...</p>
+                          </div>
+                        ) : counterfactualResult ? (
+                          <>
+                            <div className="bg-gradient-to-r from-purple-500/10 to-brand-500/10 rounded-xl p-4 border border-purple-500/20">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Zap size={18} className="text-purple-400" />
+                                <span className="font-semibold text-gray-700">反事实推理结果</span>
+                                <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-white0/10 text-purple-400">
+                                  置信度 {(counterfactualResult.confidence * 100).toFixed(0)}%
+                                </span>
+                              </div>
 
-                        {selectedPath && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            className="bg-white rounded-xl border border-gray-100 p-4"
-                          >
-                            <div className="flex items-center justify-between mb-4">
-                              <h4 className="font-semibold text-gray-700">{selectedPath.name} - 执行步骤</h4>
-                              <button
-                                onClick={() => setShowReasoningChain(!showReasoningChain)}
-                                className="text-xs text-brand-400 hover:underline"
-                              >
-                                {showReasoningChain ? '隐藏推理链' : '查看推理链'}
-                              </button>
+                              {counterfactualExplanation && (
+                                <div className="bg-white rounded-lg p-3 mb-4 border border-gray-100">
+                                  <div className="flex items-start gap-2">
+                                    <Lightbulb size={16} className="text-brand-400 mt-0.5 flex-shrink-0" />
+                                    <div>
+                                      <div className="text-xs font-bold text-gray-800 uppercase mb-1">推理结论</div>
+                                      <p className="text-sm text-gray-700 leading-relaxed">{counterfactualExplanation}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {optimalIntervention && (
+                                <div className="bg-white rounded-lg p-3 mb-4 border border-emerald-500/20">
+                                  <div className="flex items-start gap-2">
+                                    <Target size={16} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                                    <div>
+                                      <div className="text-xs font-bold text-gray-800 uppercase mb-1">最优干预点</div>
+                                      <div className="text-sm font-medium text-gray-700">{optimalIntervention.parameter}</div>
+                                      <p className="text-xs text-gray-800 mt-0.5">{optimalIntervention.reason}</p>
+                                      <div className="flex items-center gap-1 mt-1">
+                                        <span className="text-xs px-2 py-0.5 rounded bg-white0/10 text-emerald-400 border border-emerald-500/20">
+                                          弹性系数: {Math.abs(optimalIntervention.impactPerUnit).toFixed(2)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div className="bg-white rounded-lg p-3 border border-gray-100">
+                                  <div className="text-xs text-gray-800 mb-1">基准值</div>
+                                  <div className="text-xl font-bold text-gray-700">
+                                    {counterfactualResult.predictedOutcome.baselineValue.toLocaleString()}
+                                  </div>
+                                </div>
+                                <div className="bg-white rounded-lg p-3 border border-purple-500/20">
+                                  <div className="text-xs text-purple-400 mb-1">预测值</div>
+                                  <div className="text-xl font-bold text-purple-400">
+                                    {counterfactualResult.predictedOutcome.predictedValue.toLocaleString()}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-center p-3 bg-white rounded-lg mb-3">
+                                <div className={`text-3xl font-bold ${
+                                  counterfactualResult.predictedOutcome.changePercent > 0 ? 'text-emerald-400' : 'text-rose-700'
+                                }`}>
+                                  {counterfactualResult.predictedOutcome.changePercent > 0 ? '+' : ''}
+                                  {counterfactualResult.predictedOutcome.changePercent.toFixed(1)}%
+                                </div>
+                              </div>
+
+                              {keyAssumptions.length > 0 && (
+                                <div className="bg-white rounded-lg p-3 mb-3">
+                                  <div className="text-xs font-bold text-gray-800 uppercase mb-2">关键假设</div>
+                                  <div className="space-y-1">
+                                    {keyAssumptions.map((assumption, idx) => (
+                                      <div key={idx} className="flex items-start gap-2 text-xs text-gray-800">
+                                        <CheckCircle size={12} className="text-gray-800 mt-0.5 flex-shrink-0" />
+                                        <span>{assumption}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {counterfactualResult.sideEffects.length > 0 && (
+                                <div className="bg-white rounded-lg p-3">
+                                  <div className="text-xs font-medium text-gray-800 mb-2">副作用分析</div>
+                                  <div className="space-y-1">
+                                    {counterfactualResult.sideEffects.slice(0, 3).map((effect, idx) => (
+                                      <div key={idx} className="flex items-center gap-2 text-xs">
+                                        {effect.desirability === 'positive' ? (
+                                          <CheckCircle2 size={12} className="text-green-500" />
+                                        ) : effect.desirability === 'negative' ? (
+                                          <AlertCircle size={12} className="text-red-500" />
+                                        ) : (
+                                          <AlertCircle size={12} className="text-gray-800" />
+                                        )}
+                                        <span className="text-gray-800">{effect.description}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
-                            <div className="relative">
-                              <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-white/10"></div>
-
-                              <div className="space-y-4">
-                                {selectedPath.steps.map((step, index) => (
-                                  <div key={step.id} className="relative pl-10">
-                                    <div className={`absolute left-2 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                                      index === 0 ? 'bg-brand-500 border-brand-500' :
-                                      index === selectedPath.steps.length - 1 ? 'bg-green-500 border-green-500' :
-                                      'bg-white border-gray-100'
-                                    }`}>
-                                      <span className="text-[10px] text-gray-800 font-bold">{step.order}</span>
+                            {sensitivityResults.length > 0 && (
+                              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <BarChart3 size={16} className="text-brand-400" />
+                                  <span className="font-semibold text-gray-700">敏感性分析</span>
+                                </div>
+                                <div className="space-y-3">
+                                  {sensitivityResults.map((result, idx) => (
+                                    <div key={idx} className="bg-gray-50 rounded-lg p-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm font-medium text-gray-600">{result.parameter}</span>
+                                        <span className={`text-xs px-2 py-0.5 rounded ${
+                                          Math.abs(result.elasticity) > 1 
+                                            ? 'bg-white text-orange-700' 
+                                            : 'bg-white0/10 text-emerald-400'
+                                        }`}>
+                                          弹性: {result.elasticity.toFixed(2)}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-gray-800">{result.recommendation}</p>
                                     </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
-                                    <div className="bg-gray-50 rounded-lg p-3">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <span className="font-medium text-gray-700">{step.name}</span>
-                                        <span className="text-xs text-gray-800">{step.duration}天</span>
+                            {comparisonResult && (
+                              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <GitCompare size={16} className="text-emerald-400" />
+                                  <span className="font-semibold text-gray-700">方案对比</span>
+                                </div>
+                                <div className="bg-white0/10 rounded-lg p-3 mb-3 border border-emerald-500/20">
+                                  <div className="text-xs text-emerald-400 mb-1">推荐方案</div>
+                                  <div className="text-sm font-medium text-emerald-300">{comparisonResult.recommendation}</div>
+                                </div>
+                                <div className="space-y-2">
+                                  {comparisonResult.alternatives.map((alt, idx) => (
+                                    <div key={idx} className={`p-3 rounded-lg border ${
+                                      comparisonResult.ranking[0] === alt.alternative.id
+                                        ? 'bg-white0/8 border-emerald-500/20'
+                                        : 'bg-gray-50 border-gray-100'
+                                    }`}>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm font-medium text-gray-700">{alt.alternative.name}</span>
+                                        <span className={`text-xs font-medium ${
+                                          alt.comparison.netBenefit > 0 ? 'text-emerald-400' : 'text-rose-700'
+                                        }`}>
+                                          净收益: {alt.comparison.netBenefit.toFixed(2)}
+                                        </span>
                                       </div>
-                                      <p className="text-xs text-gray-800 mb-2">{step.description}</p>
-                                      <div className="flex items-center gap-2 text-xs">
-                                        <span className="text-gray-800">负责人:</span>
-                                        <span className="text-gray-600">{step.responsible}</span>
-                                      </div>
-                                      <div className="flex items-center gap-2 text-xs mt-1">
-                                        <span className="text-gray-800">预期成果:</span>
-                                        <span className="text-emerald-400">{step.expectedOutcome}</span>
-                                      </div>
-
-                                      {showReasoningChain && (
-                                        <div className="mt-2 pt-2 border-t border-gray-100">
-                                          <div className="text-[10px] text-gray-800">
-                                            推理依据: 基于历史数据分析，此步骤对整体成功率贡献度为
-                                            {((1 / selectedPath.steps.length) * 100).toFixed(0)}%
-                                          </div>
+                                      <div className="text-xs text-gray-800 mt-1">{alt.alternative.description}</div>
+                                      {alt.comparison.advantages.length > 0 && (
+                                        <div className="flex gap-1 mt-2 flex-wrap">
+                                          {alt.comparison.advantages.map((adv, i) => (
+                                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-white0/10 text-emerald-400">
+                                              {adv}
+                                            </span>
+                                          ))}
                                         </div>
                                       )}
                                     </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-2">
-                              <button
-                                onClick={() => setSelectedPath(null)}
-                                className="px-4 py-2 text-gray-800 hover:bg-gray-50 rounded-lg transition-colors text-sm"
-                              >
-                                重新选择
-                              </button>
-                              <button className="px-4 py-2 bg-white0 text-white rounded-lg hover:bg-emerald-600 transition-colors text-sm flex items-center gap-2">
-                                <Target size={16} />
-                                确认执行此路径
-                              </button>
-                            </div>
-                          </motion.div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border border-gray-100 text-gray-800">
-                        <GitBranch size={48} className="mb-2 text-gray-800" />
-                        <p className="text-sm">先在"场景模拟"标签页生成决策推演</p>
-                      </div>
-                    )}
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="counterfactual"
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="space-y-4"
-                  >
-                    {isAnalyzing ? (
-                      <div className="flex flex-col items-center justify-center h-64 bg-gradient-to-br from-purple-500/10 to-brand-500/10 rounded-xl border border-purple-500/20">
-                        <div className="animate-spin w-12 h-12 border-4 border-purple-500/20 border-t-purple-600 rounded-full mb-4"></div>
-                        <p className="text-sm text-purple-400 font-medium">正在进行反事实推理分析...</p>
-                      </div>
-                    ) : counterfactualResult ? (
-                      <>
-                        <div className="bg-gradient-to-r from-purple-500/10 to-brand-500/10 rounded-xl p-4 border border-purple-500/20">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Zap size={18} className="text-purple-400" />
-                            <span className="font-semibold text-gray-700">反事实推理结果</span>
-                            <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-white0/10 text-purple-400">
-                              置信度 {(counterfactualResult.confidence * 100).toFixed(0)}%
-                            </span>
-                          </div>
-
-                          {counterfactualExplanation && (
-                            <div className="bg-white rounded-lg p-3 mb-4 border border-gray-100">
-                              <div className="flex items-start gap-2">
-                                <Lightbulb size={16} className="text-brand-400 mt-0.5 flex-shrink-0" />
-                                <div>
-                                  <div className="text-xs font-bold text-gray-800 uppercase mb-1">推理结论</div>
-                                  <p className="text-sm text-gray-700 leading-relaxed">{counterfactualExplanation}</p>
+                                  ))}
                                 </div>
                               </div>
-                            </div>
-                          )}
+                            )}
 
-                          {optimalIntervention && (
-                            <div className="bg-white rounded-lg p-3 mb-4 border border-emerald-500/20">
-                              <div className="flex items-start gap-2">
-                                <Target size={16} className="text-emerald-400 mt-0.5 flex-shrink-0" />
-                                <div>
-                                  <div className="text-xs font-bold text-gray-800 uppercase mb-1">最优干预点</div>
-                                  <div className="text-sm font-medium text-gray-700">{optimalIntervention.parameter}</div>
-                                  <p className="text-xs text-gray-800 mt-0.5">{optimalIntervention.reason}</p>
-                                  <div className="flex items-center gap-1 mt-1">
-                                    <span className="text-xs px-2 py-0.5 rounded bg-white0/10 text-emerald-400 border border-emerald-500/20">
-                                      弹性系数: {Math.abs(optimalIntervention.impactPerUnit).toFixed(2)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="grid grid-cols-2 gap-4 mb-4">
-                            <div className="bg-white rounded-lg p-3 border border-gray-100">
-                              <div className="text-xs text-gray-800 mb-1">基准值</div>
-                              <div className="text-xl font-bold text-gray-700">
-                                {counterfactualResult.predictedOutcome.baselineValue.toLocaleString()}
-                              </div>
-                            </div>
-                            <div className="bg-white rounded-lg p-3 border border-purple-500/20">
-                              <div className="text-xs text-purple-400 mb-1">预测值</div>
-                              <div className="text-xl font-bold text-purple-400">
-                                {counterfactualResult.predictedOutcome.predictedValue.toLocaleString()}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-center p-3 bg-white rounded-lg mb-3">
-                            <div className={`text-3xl font-bold ${
-                              counterfactualResult.predictedOutcome.changePercent > 0 ? 'text-emerald-400' : 'text-rose-700'
-                            }`}>
-                              {counterfactualResult.predictedOutcome.changePercent > 0 ? '+' : ''}
-                              {counterfactualResult.predictedOutcome.changePercent.toFixed(1)}%
-                            </div>
-                          </div>
-
-                          {keyAssumptions.length > 0 && (
-                            <div className="bg-white rounded-lg p-3 mb-3">
-                              <div className="text-xs font-bold text-gray-800 uppercase mb-2">关键假设</div>
+                            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                              <div className="text-xs font-medium text-gray-800 mb-2">分析局限性</div>
                               <div className="space-y-1">
-                                {keyAssumptions.map((assumption, idx) => (
+                                {counterfactualResult.limitations.map((limitation, idx) => (
                                   <div key={idx} className="flex items-start gap-2 text-xs text-gray-800">
-                                    <CheckCircle size={12} className="text-gray-800 mt-0.5 flex-shrink-0" />
-                                    <span>{assumption}</span>
+                                    <AlertTriangle size={12} className="text-yellow-500 mt-0.5 flex-shrink-0" />
+                                    <span>{limitation}</span>
                                   </div>
                                 ))}
                               </div>
                             </div>
-                          )}
-
-                          {counterfactualResult.sideEffects.length > 0 && (
-                            <div className="bg-white rounded-lg p-3">
-                              <div className="text-xs font-medium text-gray-800 mb-2">副作用分析</div>
-                              <div className="space-y-1">
-                                {counterfactualResult.sideEffects.slice(0, 3).map((effect, idx) => (
-                                  <div key={idx} className="flex items-center gap-2 text-xs">
-                                    {effect.desirability === 'positive' ? (
-                                      <CheckCircle2 size={12} className="text-green-500" />
-                                    ) : effect.desirability === 'negative' ? (
-                                      <AlertCircle size={12} className="text-red-500" />
-                                    ) : (
-                                      <AlertCircle size={12} className="text-gray-800" />
-                                    )}
-                                    <span className="text-gray-800">{effect.description}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {sensitivityResults.length > 0 && (
-                          <div className="bg-white rounded-xl p-4 border border-gray-100">
-                            <div className="flex items-center gap-2 mb-3">
-                              <BarChart3 size={16} className="text-brand-400" />
-                              <span className="font-semibold text-gray-700">敏感性分析</span>
-                            </div>
-                            <div className="space-y-3">
-                              {sensitivityResults.map((result, idx) => (
-                                <div key={idx} className="bg-gray-50 rounded-lg p-3">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <span className="text-sm font-medium text-gray-600">{result.parameter}</span>
-                                    <span className={`text-xs px-2 py-0.5 rounded ${
-                                      Math.abs(result.elasticity) > 1 
-                                        ? 'bg-white text-orange-700' 
-                                        : 'bg-white0/10 text-emerald-400'
-                                    }`}>
-                                      弹性: {result.elasticity.toFixed(2)}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-gray-800">{result.recommendation}</p>
-                                </div>
-                              ))}
-                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border border-gray-100 text-gray-800">
+                            <Zap size={48} className="mb-2 text-gray-800" />
+                            <p className="text-sm">选择场景后自动进行反事实分析</p>
                           </div>
                         )}
-
-                        {comparisonResult && (
-                          <div className="bg-white rounded-xl p-4 border border-gray-100">
-                            <div className="flex items-center gap-2 mb-3">
-                              <GitCompare size={16} className="text-emerald-400" />
-                              <span className="font-semibold text-gray-700">方案对比</span>
-                            </div>
-                            <div className="bg-white0/10 rounded-lg p-3 mb-3 border border-emerald-500/20">
-                              <div className="text-xs text-emerald-400 mb-1">推荐方案</div>
-                              <div className="text-sm font-medium text-emerald-300">{comparisonResult.recommendation}</div>
-                            </div>
-                            <div className="space-y-2">
-                              {comparisonResult.alternatives.map((alt, idx) => (
-                                <div key={idx} className={`p-3 rounded-lg border ${
-                                  comparisonResult.ranking[0] === alt.alternative.id
-                                    ? 'bg-white0/8 border-emerald-500/20'
-                                    : 'bg-gray-50 border-gray-100'
-                                }`}>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm font-medium text-gray-700">{alt.alternative.name}</span>
-                                    <span className={`text-xs font-medium ${
-                                      alt.comparison.netBenefit > 0 ? 'text-emerald-400' : 'text-rose-700'
-                                    }`}>
-                                      净收益: {alt.comparison.netBenefit.toFixed(2)}
-                                    </span>
-                                  </div>
-                                  <div className="text-xs text-gray-800 mt-1">{alt.alternative.description}</div>
-                                  {alt.comparison.advantages.length > 0 && (
-                                    <div className="flex gap-1 mt-2 flex-wrap">
-                                      {alt.comparison.advantages.map((adv, i) => (
-                                        <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-white0/10 text-emerald-400">
-                                          {adv}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                          <div className="text-xs font-medium text-gray-800 mb-2">分析局限性</div>
-                          <div className="space-y-1">
-                            {counterfactualResult.limitations.map((limitation, idx) => (
-                              <div key={idx} className="flex items-start gap-2 text-xs text-gray-800">
-                                <AlertTriangle size={12} className="text-yellow-500 mt-0.5 flex-shrink-0" />
-                                <span>{limitation}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
                       </>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-xl border border-gray-100 text-gray-800">
-                        <Zap size={48} className="mb-2 text-gray-800" />
-                        <p className="text-sm">选择场景后自动进行反事实分析</p>
-                      </div>
                     )}
                   </motion.div>
-                )}
+                ) : null}
               </AnimatePresence>
             </>
           )}

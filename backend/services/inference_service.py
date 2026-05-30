@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from models.inference import InferenceRule, InferenceResult
 from models.ontology import OntologyObject, ObjectLink
 from models.notification import Notification
-from services.ontology_service import _split_field, DOMAIN_MODEL_MAP
+from services.domain_mapper import _split_field, DOMAIN_MODEL_MAP
 from services import link_service
 
 

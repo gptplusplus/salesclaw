@@ -7,7 +7,9 @@ from sqlalchemy import desc
 from models.ontology import OntologyObject, ObjectLink, TimeSeriesData, ObjectEvent
 from models.inference import InferenceResult
 from models.domain import Doctor, Hospital, SalesTarget, VisitRecord
-from services.ontology_service import _batch_load_related_data, build_ontology_object_response, DOMAIN_MODEL_MAP
+from services.ontology_service import _batch_load_related_data
+from services.ontology_response_builder import build_ontology_object_response
+from services.domain_mapper import DOMAIN_MODEL_MAP
 
 
 def validate_consistency(db: Session, object_type: Optional[str] = None) -> Dict[str, Any]:

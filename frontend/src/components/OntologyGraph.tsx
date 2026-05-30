@@ -82,6 +82,93 @@ const LINK_TYPE_COLORS: Record<string, string> = {
   PARTICIPATES_IN: 'stroke-teal-400',
 };
 
+const DOMAIN_GROUPS = [
+  {
+    name: '核心域',
+    color: 'blue',
+    textColor: '#2563eb',
+    bgColor: '#eff6ff',
+    types: [
+      { value: 'Doctor', label: '医生' },
+      { value: 'Hospital', label: '医院' },
+      { value: 'Product', label: '产品' },
+      { value: 'SalesRep', label: '代表' },
+      { value: 'VisitRecord', label: '拜访记录' },
+      { value: 'SalesTarget', label: '销售目标' },
+      { value: 'ComplianceAlert', label: '合规告警' },
+      { value: 'AcademicEvent', label: '学术活动' },
+      { value: 'Territory', label: '区域' },
+      { value: 'RecoveryPlan', label: '恢复计划' },
+    ],
+  },
+  {
+    name: '收入目标管理',
+    color: 'emerald',
+    textColor: '#059669',
+    bgColor: '#ecfdf5',
+    types: [
+      { value: 'SalesFlow', label: '销售流' },
+      { value: 'MarketPotential', label: '市场潜力' },
+      { value: 'HospitalDevelopment', label: '医院开发' },
+      { value: 'TerritoryPerformance', label: '区域绩效' },
+      { value: 'ProductFlow', label: '产品流' },
+    ],
+  },
+  {
+    name: '费用管理',
+    color: 'amber',
+    textColor: '#d97706',
+    bgColor: '#fffbeb',
+    types: [
+      { value: 'BudgetCategory', label: '预算分类' },
+      { value: 'ExpenseClassification', label: '费用分类' },
+      { value: 'CostDriver', label: '成本驱动' },
+      { value: 'LaborPayment', label: '劳务支付' },
+      { value: 'ExpenseROI', label: '费用ROI' },
+    ],
+  },
+  {
+    name: '客户管理',
+    color: 'purple',
+    textColor: '#7c3aed',
+    bgColor: '#f5f3ff',
+    types: [
+      { value: 'CustomerCategory', label: '客户分类' },
+      { value: 'VisitFeedback', label: '拜访反馈' },
+      { value: 'PDCAPlan', label: 'PDCA计划' },
+      { value: 'HospitalStrategy', label: '医院策略' },
+      { value: 'DepartmentResearch', label: '科室调研' },
+    ],
+  },
+  {
+    name: '医学事务',
+    color: 'rose',
+    textColor: '#e11d48',
+    bgColor: '#fff1f2',
+    types: [
+      { value: 'RWSProject', label: 'RWS项目' },
+      { value: 'ClinicalTrial', label: '临床试验' },
+      { value: 'PatientProgram', label: '患者项目' },
+      { value: 'ResearchCollaboration', label: '科研合作' },
+    ],
+  },
+  {
+    name: '合规管理',
+    color: 'orange',
+    textColor: '#ea580c',
+    bgColor: '#fff7ed',
+    types: [
+      { value: 'MeetingCompliance', label: '会议合规' },
+      { value: 'ExpenseCompliance', label: '费用合规' },
+      { value: 'CustomerCompliance', label: '客户合规' },
+      { value: 'ComplianceRule', label: '合规规则' },
+    ],
+  },
+];
+
+const TYPE_LABEL_MAP: Record<string, string> = {};
+DOMAIN_GROUPS.forEach(g => g.types.forEach(t => { TYPE_LABEL_MAP[t.value] = t.label; }));
+
 const POSITIONS: Record<string, { x: number; y: number }> = {
   'h1': { x: 400, y: 280 },
   'h2': { x: 700, y: 280 },
@@ -801,22 +888,29 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({ objects, onNodeClick, onA
         </>
       )}
 
-      {/* 图例 - 修复溢出问题 */}
+      {/* 图例 - 域分组 */}
       <div className="absolute top-4 left-4 z-10 bg-white rounded-lg p-3 text-xs text-gray-800 border border-gray-100 shadow-sm max-h-[calc(100%-2rem)] overflow-y-auto"
         style={{ minWidth: 160 }}>
         <div className="font-bold text-gray-700 mb-2">对象类型</div>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-          {Object.entries(OBJECT_TYPE_COLORS).slice(0, 6).map(([type, colors]) => (
-            <div key={type} className="flex items-center space-x-1.5 whitespace-nowrap">
-              <span className={`w-2 h-2 rounded-full border ${colors.border}`} style={{ backgroundColor: colors.textColor + '22' }}></span>
-              <span className="text-xs leading-none">{type === ObjectType.Doctor ? '医生' :
-                type === ObjectType.Hospital ? '医院' :
-                type === ObjectType.Product ? '产品' :
-                type === ObjectType.SalesRep ? '代表' :
-                type === ObjectType.VisitRecord ? '拜访' : type}</span>
+        {DOMAIN_GROUPS.map(group => (
+          <div key={group.name} className="mb-2">
+            <div className="flex items-center gap-1.5 mb-1 px-1 py-0.5 rounded" style={{ backgroundColor: group.bgColor }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: group.textColor }}></span>
+              <span className="text-[10px] font-semibold" style={{ color: group.textColor }}>{group.name}</span>
             </div>
-          ))}
-        </div>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 pl-1">
+              {group.types.map(t => {
+                const colors = OBJECT_TYPE_COLORS[t.value as ObjectType];
+                return (
+                  <div key={t.value} className="flex items-center space-x-1 whitespace-nowrap">
+                    <span className={`w-2 h-2 rounded-full border ${colors?.border || 'border-gray-200'}`} style={{ backgroundColor: (colors?.textColor || '#94a3b8') + '22' }}></span>
+                    <span className="text-xs leading-none">{t.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
         <div className="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-700 leading-tight">
           左键拖拽画布 · 滚轮缩放<br />
           右键点击节点查看更多选项
@@ -1046,6 +1140,14 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({ objects, onNodeClick, onA
                   );
                 })}
 
+                {/* 合规风险等级指示环 */}
+                {node.complianceRiskLevel === 'high' && (
+                  <circle r={isSelected ? 30 : 26} fill="none" stroke="#ef4444" strokeWidth="2" opacity="0.7" />
+                )}
+                {node.complianceRiskLevel === 'medium' && (
+                  <circle r={isSelected ? 30 : 26} fill="none" stroke="#f97316" strokeWidth="2" opacity="0.7" />
+                )}
+
                 {/* 节点主体 */}
                 <circle
                   r={isSelected ? 26 : 22}
@@ -1078,6 +1180,23 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({ objects, onNodeClick, onA
                 >
                   {node.name.length > 8 ? node.name.substring(0, 7) + '…' : node.name}
                 </text>
+
+                {/* 情感指示点 */}
+                {node.sentiment && (
+                  <circle
+                    cx="0"
+                    dy="3.6em"
+                    cy={isSelected ? 38 : 34}
+                    r="3"
+                    fill={
+                      node.sentiment === 'positive' ? '#22c55e' :
+                      node.sentiment === 'negative' ? '#ef4444' :
+                      '#94a3b8'
+                    }
+                    opacity="0.8"
+                    className="pointer-events-none"
+                  />
+                )}
               </g>
             );
           })}
@@ -1109,7 +1228,7 @@ const OntologyGraph: React.FC<OntologyGraphProps> = ({ objects, onNodeClick, onA
               </span>
             )}
           </div>
-          <div className="text-xs text-gray-800 mb-1">{hoveredNode.objectType}</div>
+          <div className="text-xs text-gray-800 mb-1">{TYPE_LABEL_MAP[hoveredNode.objectType] || hoveredNode.objectType}</div>
           {hoveredNode.links.length > 0 && (
             <div className="text-xs text-gray-700">关联: {hoveredNode.links.length} 个对象</div>
           )}

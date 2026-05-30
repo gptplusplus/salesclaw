@@ -66,19 +66,18 @@ export function useOntology(userId: string) {
 
   const searchObjects = useCallback(async (
     objectType: string,
-    query: string,
-    limit: number = 10
+    query: string
   ): Promise<any[]> => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await apiClient.searchOntologyObjects(objectType, query, userId, limit);
-      return response.results.map(item => ({
+      const response = await apiClient.searchOntologyObjects(objectType, query);
+      return (Array.isArray(response) ? response : []).map(item => ({
         id: item.id,
         objectType: objectType,
-        name: item.properties.name || item.id,
-        properties: item.properties,
+        name: item.properties?.name || item.name || item.id,
+        properties: item.properties || {},
       }));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '未知错误';
@@ -208,13 +207,13 @@ export function useWebSocketChat(clientId: string) {
           if (data.type === 'connected') {
             setIsConnected(true);
           } else if (data.type === 'chunk') {
-            setMessages(prev => [...prev, data]);
+            setMessages(prev => [...prev, data].slice(-100));
           } else if (data.type === 'done') {
             // keep connected state
           } else if (data.type === 'error') {
             setError(data.message);
           } else if (data.type === 'new_alert' || data.type === 'action_status_change' || data.type === 'reminder_update') {
-            setMessages(prev => [...prev, data]);
+            setMessages(prev => [...prev, data].slice(-100));
           }
         },
         () => {

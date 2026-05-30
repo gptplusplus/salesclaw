@@ -4,199 +4,14 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from models.ontology import OntologyObject, ObjectLink, ObjectAction, ActionParameter, ObjectEvent, TimeSeriesData
 from services import lifecycle_service
-from models.domain import (
-    Doctor, Hospital, Product, SalesRep, VisitRecord, SalesTarget,
-    ComplianceAlert, AcademicEvent, Territory, RecoveryPlan,
-    SalesFlow, MarketPotential, HospitalDevelopment, TerritoryPerformance,
-    ProductFlow, BudgetCategory, ExpenseClassification, CostDriver,
-    LaborPayment, ExpenseROI, CustomerCategory, VisitFeedback,
-    PDCAPlan, HospitalStrategy, DepartmentResearch, RWSProject,
-    ClinicalTrial, PatientProgram, ResearchCollaboration,
-    MeetingCompliance, ExpenseCompliance, CustomerCompliance, ComplianceRule,
-)
 from services import link_service
 from services.event_bus import publish_ontology_event, EventType
 from services.cache_service import get_cached_object, set_cached_object, invalidate_object_cache, invalidate_all_cache
-
-DOMAIN_MODEL_MAP = {
-    "Doctor": Doctor,
-    "Hospital": Hospital,
-    "Product": Product,
-    "SalesRep": SalesRep,
-    "VisitRecord": VisitRecord,
-    "SalesTarget": SalesTarget,
-    "ComplianceAlert": ComplianceAlert,
-    "AcademicEvent": AcademicEvent,
-    "Territory": Territory,
-    "RecoveryPlan": RecoveryPlan,
-    "SalesFlow": SalesFlow,
-    "MarketPotential": MarketPotential,
-    "HospitalDevelopment": HospitalDevelopment,
-    "TerritoryPerformance": TerritoryPerformance,
-    "ProductFlow": ProductFlow,
-    "BudgetCategory": BudgetCategory,
-    "ExpenseClassification": ExpenseClassification,
-    "CostDriver": CostDriver,
-    "LaborPayment": LaborPayment,
-    "ExpenseROI": ExpenseROI,
-    "CustomerCategory": CustomerCategory,
-    "VisitFeedback": VisitFeedback,
-    "PDCAPlan": PDCAPlan,
-    "HospitalStrategy": HospitalStrategy,
-    "DepartmentResearch": DepartmentResearch,
-    "RWSProject": RWSProject,
-    "ClinicalTrial": ClinicalTrial,
-    "PatientProgram": PatientProgram,
-    "ResearchCollaboration": ResearchCollaboration,
-    "MeetingCompliance": MeetingCompliance,
-    "ExpenseCompliance": ExpenseCompliance,
-    "CustomerCompliance": CustomerCompliance,
-    "ComplianceRule": ComplianceRule,
-}
-
-FIELD_SEPARATOR = ","
+from services.ontology_response_builder import build_ontology_object_response, _domain_row_to_dict, _link_properties_to_dict
+from services.domain_mapper import DOMAIN_MODEL_MAP, _split_field, _join_field, _create_domain_row, _update_domain_row
 
 
-def _split_field(value: Optional[str]) -> List[str]:
-    if not value:
-        return []
-    return [v.strip() for v in value.split(FIELD_SEPARATOR) if v.strip()]
-
-
-def _join_field(values: List[str]) -> str:
-    return FIELD_SEPARATOR.join(values)
-
-
-def _domain_row_to_dict(row) -> Dict[str, Any]:
-    if row is None:
-        return {}
-    result = {}
-    for col in row.__table__.columns:
-        if col.name == "id":
-            continue
-        val = getattr(row, col.name, None)
-        if val is None:
-            continue
-        col_type = str(col.type).upper()
-        if col_type == "TEXT" and isinstance(val, str):
-            if col.name in (
-                "specialty", "key_insights", "preconditions", "side_effects",
-                "write_back_targets", "do_actions", "check_results",
-                "act_improvements", "related_expenses", "compliance_history",
-            ):
-                val = _split_field(val)
-        result[col.name] = val
-    return result
-
-
-def _link_properties_to_dict(link: ObjectLink) -> Optional[Dict[str, Any]]:
-    props = {}
-    if link.link_strength is not None:
-        props["strength"] = link.link_strength
-    if link.link_frequency is not None:
-        props["frequency"] = link.link_frequency
-    if link.link_volume is not None:
-        props["volume"] = link.link_volume
-    if link.confidence is not None:
-        props["confidence"] = link.confidence
-    if link.valid_from is not None:
-        props["valid_from"] = link.valid_from
-    if link.valid_to is not None:
-        props["valid_to"] = link.valid_to
-    if link.provenance is not None:
-        props["provenance"] = link.provenance
-    if link.inverse_relation is not None:
-        props["inverse_relation"] = link.inverse_relation
-    return props if props else None
-
-
-def build_ontology_object_response(
-    obj: OntologyObject,
-    links: List[ObjectLink],
-    actions: List[ObjectAction],
-    action_params_map: Dict[str, List[ActionParameter]],
-    events: List[ObjectEvent],
-    time_series: List[TimeSeriesData],
-    domain_row=None,
-) -> Dict[str, Any]:
-    properties = _domain_row_to_dict(domain_row) if domain_row else {}
-
-    link_schemas = []
-    for link in links:
-        link_dict = {
-            "linkType": link.link_type,
-            "targetId": link.target_id,
-            "targetName": link.target_name,
-            "targetType": link.target_type,
-        }
-        link_props = _link_properties_to_dict(link)
-        if link_props:
-            link_dict["properties"] = link_props
-        link_schemas.append(link_dict)
-
-    action_schemas = []
-    for action in actions:
-        params = action_params_map.get(action.id, [])
-        param_list = []
-        for p in params:
-            param_list.append({
-                "name": p.name,
-                "type": p.param_type,
-                "required": p.required,
-                "defaultValue": p.default_value,
-                "description": p.description,
-            })
-        action_schemas.append({
-            "id": action.id,
-            "name": action.name,
-            "description": action.description,
-            "parameters": param_list,
-            "preconditions": _split_field(action.preconditions),
-            "sideEffects": _split_field(action.side_effects),
-            "writeBackTargets": _split_field(action.write_back_targets),
-            "requiresApproval": action.requires_approval,
-        })
-
-    event_schemas = []
-    for event in events:
-        event_schemas.append({
-            "id": event.id,
-            "eventType": event.event_type,
-            "timestamp": event.timestamp,
-            "description": event.description,
-            "relatedObjectId": event.related_object_id,
-            "relatedObjectName": event.related_object_name,
-        })
-
-    ts_dict: Dict[str, List[Dict[str, Any]]] = {}
-    for ts in time_series:
-        if ts.series_name not in ts_dict:
-            ts_dict[ts.series_name] = []
-        ts_dict[ts.series_name].append({
-            "timestamp": ts.timestamp,
-            "value": ts.value,
-        })
-
-    return {
-        "id": obj.id,
-        "objectType": obj.object_type,
-        "name": obj.name,
-        "properties": properties,
-        "links": link_schemas,
-        "actions": action_schemas,
-        "events": event_schemas,
-        "timeSeries": ts_dict,
-        "interfaces": [],
-        "status": obj.status,
-        "lifecycleStage": obj.lifecycle_stage,
-        "sentiment": obj.sentiment,
-        "complianceRiskLevel": obj.compliance_risk_level,
-        "ownerId": obj.owner_id,
-        "stakeholders": json.loads(obj.stakeholders) if obj.stakeholders else None,
-    }
-
-
-def _batch_load_related_data(db: Session, object_ids: List[str], objects: List[OntologyObject]) -> Dict[str, Dict[str, Any]]:
+def _batch_load_related_data(db: Session, object_ids: List[str], objects: List[OntologyObject], include_time_series: bool = True, max_events: Optional[int] = None) -> Dict[str, Dict[str, Any]]:
     if not object_ids:
         return {}
 
@@ -219,15 +34,20 @@ def _batch_load_related_data(db: Session, object_ids: List[str], objects: List[O
         for p in all_params:
             action_params_map.setdefault(p.action_id, []).append(p)
 
-    all_events = db.query(ObjectEvent).filter(ObjectEvent.object_id.in_(object_ids)).all()
+    all_events = db.query(ObjectEvent).filter(ObjectEvent.object_id.in_(object_ids)).order_by(ObjectEvent.timestamp.desc()).all()
     events_by_obj: Dict[str, List[ObjectEvent]] = {}
     for event in all_events:
         events_by_obj.setdefault(event.object_id, []).append(event)
 
-    all_time_series = db.query(TimeSeriesData).filter(TimeSeriesData.object_id.in_(object_ids)).all()
+    if max_events is not None:
+        for obj_id in events_by_obj:
+            events_by_obj[obj_id] = events_by_obj[obj_id][:max_events]
+
     ts_by_obj: Dict[str, List[TimeSeriesData]] = {}
-    for ts in all_time_series:
-        ts_by_obj.setdefault(ts.object_id, []).append(ts)
+    if include_time_series:
+        all_time_series = db.query(TimeSeriesData).filter(TimeSeriesData.object_id.in_(object_ids)).all()
+        for ts in all_time_series:
+            ts_by_obj.setdefault(ts.object_id, []).append(ts)
 
     type_to_ids: Dict[str, List[str]] = {}
     for obj in objects:
@@ -267,7 +87,7 @@ def get_all_objects(db: Session, object_type: Optional[str] = None, page: int = 
         return {"results": [], "total": total, "page": page, "page_size": page_size, "has_next": offset + page_size < total}
 
     object_ids = [obj.id for obj in objects]
-    related_data = _batch_load_related_data(db, object_ids, objects)
+    related_data = _batch_load_related_data(db, object_ids, objects, include_time_series=False, max_events=3)
 
     results = []
     for obj in objects:
@@ -461,26 +281,6 @@ def create_object(db: Session, object_type: str, data: Dict[str, Any]) -> Dict[s
     return result
 
 
-def _create_domain_row(db: Session, object_type: str, obj_id: str, properties: Dict[str, Any]):
-    model_class = DOMAIN_MODEL_MAP.get(object_type)
-    if not model_class:
-        return
-    col_names = {c.name for c in model_class.__table__.columns}
-    filtered = {}
-    for k, v in properties.items():
-        db_field = k
-        if db_field in col_names:
-            if isinstance(v, list):
-                v = _join_field([str(i) for i in v])
-            filtered[db_field] = v
-    if not filtered:
-        filtered = {"id": obj_id}
-    else:
-        filtered["id"] = obj_id
-    row = model_class(**filtered)
-    db.add(row)
-
-
 def update_object(db: Session, object_type: str, object_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     obj = db.query(OntologyObject).filter(
         OntologyObject.id == object_id,
@@ -526,22 +326,6 @@ def update_object(db: Session, object_type: str, object_id: str, data: Dict[str,
     if old_status != obj.status:
         publish_ontology_event(EventType.STATUS_CHANGED, object_id=object_id, object_type=object_type, object_name=obj.name, data={"from": old_status, "to": obj.status}, source="api")
     return _get_full_object(db, obj)
-
-
-def _update_domain_row(db: Session, object_type: str, obj_id: str, properties: Dict[str, Any]):
-    model_class = DOMAIN_MODEL_MAP.get(object_type)
-    if not model_class:
-        return
-    row = db.query(model_class).filter(model_class.id == obj_id).first()
-    if not row:
-        _create_domain_row(db, object_type, obj_id, properties)
-        return
-    col_names = {c.name for c in model_class.__table__.columns}
-    for k, v in properties.items():
-        if k in col_names and k != "id":
-            if isinstance(v, list):
-                v = _join_field([str(i) for i in v])
-            setattr(row, k, v)
 
 
 def delete_object(db: Session, object_type: str, object_id: str) -> bool:

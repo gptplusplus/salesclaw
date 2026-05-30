@@ -7,7 +7,7 @@ from models.ontology import OntologyObject, ObjectAction, ActionParameter, Objec
 from models.action import ActionProposal
 from models.execution import ExecutionLog
 from models.audit import AuditLog
-from services.ontology_service import _split_field, _join_field, DOMAIN_MODEL_MAP
+from services.domain_mapper import _split_field, _join_field, DOMAIN_MODEL_MAP
 
 class ActionExecutor:
     def __init__(self, db: Session):
@@ -232,6 +232,14 @@ class ActionExecutor:
             alert_status="pending",
         )
         self.db.add(alert)
+        link = ObjectLink(
+            source_id=obj.id,
+            link_type="HAS_ALERT",
+            target_id=alert.id,
+            target_name=f"合规告警-{obj.name}",
+            target_type="ComplianceAlert",
+        )
+        self.db.add(link)
         return {"message": f"Compliance risk flagged for {obj.name}", "alert_id": alert.id}
 
     def _action_mark_at_risk(self, obj, params):
@@ -311,6 +319,16 @@ class ActionExecutor:
 
     def _action_advance_cycle(self, obj, params):
         from services.lifecycle_service import validate_transition, get_valid_transitions
+        target_stage = params.get("targetStage")
+        if target_stage:
+            if obj.lifecycle_stage:
+                valid = validate_transition(obj.object_type, obj.lifecycle_stage, target_stage)
+                if valid:
+                    obj.lifecycle_stage = target_stage
+                    return {"message": f"Cycle advanced to {target_stage} for {obj.name}"}
+                return {"success": False, "message": f"Cannot transition from {obj.lifecycle_stage} to {target_stage}"}
+            obj.lifecycle_stage = target_stage
+            return {"message": f"Cycle set to {target_stage} for {obj.name}"}
         if obj.lifecycle_stage:
             valid_transitions = get_valid_transitions(obj.object_type, obj.lifecycle_stage)
             if valid_transitions:
@@ -442,6 +460,13 @@ class ActionExecutor:
         return {"effect": f"notify {target}", "status": "success", "notified_user": target_user_id}
 
     def _side_effect_trigger(self, obj, engine, params):
+        if "inference_engine" in engine:
+            try:
+                from services.inference_service import run_inference
+                run_inference(self.db)
+                return {"effect": f"trigger {engine}", "status": "success", "note": f"Triggered {engine}"}
+            except Exception as e:
+                return {"effect": f"trigger {engine}", "status": "error", "note": str(e)}
         return {"effect": f"trigger {engine}", "status": "success", "note": f"Triggered {engine}"}
 
     def _write_back(self, target_system: str, obj: OntologyObject, action_name: str, params: Dict):

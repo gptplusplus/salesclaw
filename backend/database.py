@@ -171,6 +171,8 @@ def _migrate_schema():
             _create_index_if_not_exists(conn, "idx_object_link_source", "object_links", "source_id")
             _create_index_if_not_exists(conn, "idx_object_link_target", "object_links", "target_id")
             _create_index_if_not_exists(conn, "idx_object_link_type", "object_links", "link_type")
+            _create_index_if_not_exists(conn, "idx_link_source_type", "object_links", "source_id, link_type")
+            _create_index_if_not_exists(conn, "idx_link_target_type", "object_links", "target_id, link_type")
 
         if "ontology_objects" in existing_tables:
             existing_columns = {col["name"] for col in inspector.get_columns("ontology_objects")}
@@ -183,6 +185,15 @@ def _migrate_schema():
             _create_index_if_not_exists(conn, "idx_ontology_object_type", "ontology_objects", "object_type")
             _create_index_if_not_exists(conn, "idx_ontology_status", "ontology_objects", "status")
             _create_index_if_not_exists(conn, "idx_ontology_owner_id", "ontology_objects", "owner_id")
+
+        if "object_events" in existing_tables:
+            _create_index_if_not_exists(conn, "idx_event_object_type", "object_events", "object_id, event_type")
+
+        if "time_series_data" in existing_tables:
+            _create_index_if_not_exists(conn, "idx_ts_object_series", "time_series_data", "object_id, series_name")
+
+        if "object_actions" in existing_tables:
+            _create_index_if_not_exists(conn, "idx_action_object_id", "object_actions", "object_id")
 
         if "action_proposals" in existing_tables:
             existing_columns = {col["name"] for col in inspector.get_columns("action_proposals")}

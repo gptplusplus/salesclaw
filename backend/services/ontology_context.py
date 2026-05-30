@@ -3,7 +3,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 from models.ontology import OntologyObject, ObjectLink, ObjectAction, ActionParameter, ObjectEvent, TimeSeriesData
-from services.ontology_service import _domain_row_to_dict, DOMAIN_MODEL_MAP
+from services.domain_mapper import DOMAIN_MODEL_MAP
+from services.ontology_response_builder import _domain_row_to_dict
 from services.ontology_definition import get_concept_definition, get_relation_definition
 
 

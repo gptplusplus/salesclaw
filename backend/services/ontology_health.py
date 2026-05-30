@@ -97,7 +97,8 @@ def _find_zombie_actions(db: Session) -> List[Dict[str, Any]]:
 
 
 def _find_missing_properties(db: Session) -> List[Dict[str, Any]]:
-    from services.ontology_service import DOMAIN_MODEL_MAP, _domain_row_to_dict
+    from services.domain_mapper import DOMAIN_MODEL_MAP
+    from services.ontology_response_builder import _domain_row_to_dict
 
     issues = []
     all_objects = db.query(OntologyObject).all()

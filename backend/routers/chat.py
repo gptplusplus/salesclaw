@@ -1,6 +1,7 @@
 from typing import Optional
 import asyncio
 import json
+import logging
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -20,11 +21,13 @@ from services.chat_service import (
 )
 from llm import is_llm_configured, build_system_prompt, chat_with_llm_stream_with_thinking
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(
+async def chat(
     req: ChatRequest,
     db: Session = Depends(get_db),
     user: User = Depends(require_auth),
@@ -33,7 +36,7 @@ def chat(
     thread = create_or_get_thread(db, user_id, req.thread_id)
     save_message(db, thread.id, "user", req.message)
 
-    response_text, reasoning_info = _get_chat_response(db, req.message, thread.id)
+    response_text, reasoning_info = await _get_chat_response(db, req.message, thread.id)
 
     save_message(db, thread.id, "assistant", response_text)
     return ChatResponse(
@@ -44,22 +47,21 @@ def chat(
     )
 
 
-def _get_chat_response(db: Session, message: str, thread_id: str) -> tuple:
+async def _get_chat_response(db: Session, message: str, thread_id: str) -> tuple:
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(generate_response_with_llm(db, message, thread_id))
-        loop.close()
+        result = await generate_response_with_llm(db, message, thread_id)
         if result:
-            print(f"✅ LLM response generated for: {message[:50]}")
+            logger.info("LLM response generated for: %s", message[:50])
             return result, None
         else:
-            print("⚠️ LLM returned None, falling back to agent or template")
+            logger.warning("LLM returned None, falling back to agent or template")
     except Exception as e:
-        print(f"❌ LLM call failed: {type(e).__name__}: {e}")
+        logger.error("LLM call failed: %s: %s", type(e).__name__, e)
 
     if _is_complex_question(message):
-        agent_response, agent_result = generate_response_with_agent(db, message)
+        agent_response, agent_result = await asyncio.to_thread(
+            generate_response_with_agent, db, message
+        )
         if agent_response:
             return agent_response, agent_result
 
@@ -67,15 +69,15 @@ def _get_chat_response(db: Session, message: str, thread_id: str) -> tuple:
 
 
 async def _stream_response_generator(db: Session, message: str, thread_id: str):
-    print(f"📡 Starting stream generator...")
+    logger.debug("Starting stream generator")
     try:
-        print(f"🔗 Sending connected event")
+        logger.debug("Sending connected event")
         yield "data: " + json.dumps({"type": "connected"}, ensure_ascii=False) + "\n\n"
 
         if not is_llm_configured():
-            print(f"⚠️ LLM not configured, falling back to agent or template")
+            logger.warning("LLM not configured, falling back to agent or template")
             if _is_complex_question(message):
-                print(f"🤖 Trying agent for complex question...")
+                logger.info("Trying agent for complex question")
                 agent_response, agent_result = generate_response_with_agent(db, message)
                 if agent_response:
                     full_answer = str(agent_response)
@@ -96,10 +98,10 @@ async def _stream_response_generator(db: Session, message: str, thread_id: str):
                     }, ensure_ascii=False)
                     yield f"data: {final_data}\n\n"
                     yield "data: [DONE]\n\n"
-                    print(f"✅ Agent response sent")
+                    logger.info("Agent response sent")
                     return
 
-            print(f"📝 Using template response...")
+            logger.info("Using template response")
             template_response = generate_response(db, message)
             full_answer = template_response or "抱歉，系统暂时无法回答您的问题。"
             data = json.dumps({
@@ -119,20 +121,29 @@ async def _stream_response_generator(db: Session, message: str, thread_id: str):
             }, ensure_ascii=False)
             yield f"data: {final_data}\n\n"
             yield "data: [DONE]\n\n"
-            print(f"✅ Template response sent")
+            logger.info("Template response sent")
             return
 
-        print(f"📝 Getting data summary and building system prompt...")
+        logger.debug("Getting data summary and building system prompt")
         data_summary = _get_data_summary(db)
         system_prompt = build_system_prompt(data_summary)
 
+        try:
+            from services.ontology_context import build_ontology_context_for_query, format_context_for_llm
+            oag_context = build_ontology_context_for_query(db, message)
+            if oag_context.get("contexts"):
+                oag_text = format_context_for_llm(oag_context)
+                system_prompt += f"\n\n## Ontology 上下文\n{oag_text}"
+        except Exception:
+            pass
+
         messages = []
         if thread_id:
-            print(f"💬 Loading thread messages for thread: {thread_id}")
+            logger.debug("Loading thread messages for thread: %s", thread_id)
             messages = _get_thread_messages(db, thread_id)
         messages.append({"role": "user", "content": message})
         
-        print(f"🚀 Calling LLM stream API with {len(messages)} messages...")
+        logger.info("Calling LLM stream API with %d messages", len(messages))
 
         full_thinking = ""
         full_answer = ""
@@ -142,7 +153,7 @@ async def _stream_response_generator(db: Session, message: str, thread_id: str):
         async for chunk_type, chunk_content in chat_with_llm_stream_with_thinking(messages, system_prompt):
             chunk_count += 1
             current_type = chunk_type
-            print(f"📦 LLM chunk #{chunk_count}: type={chunk_type}, len={len(chunk_content)}")
+            logger.debug("LLM chunk #%d: type=%s, len=%d", chunk_count, chunk_type, len(chunk_content))
             if chunk_type == "thinking":
                 full_thinking += chunk_content
                 data = json.dumps({
@@ -162,12 +173,10 @@ async def _stream_response_generator(db: Session, message: str, thread_id: str):
                 }, ensure_ascii=False)
                 yield f"data: {data}\n\n"
 
-        print(f"\n📊 Stream complete: {chunk_count} chunks")
-        print(f"   Thinking: {len(full_thinking)} chars")
-        print(f"   Answer: {len(full_answer)} chars")
+        logger.info("Stream complete: %d chunks, thinking: %d chars, answer: %d chars", chunk_count, len(full_thinking), len(full_answer))
         
         if not full_thinking and not full_answer:
-            print(f"⚠️ No content from LLM, falling back to agent or template")
+            logger.warning("No content from LLM, falling back to agent or template")
             if _is_complex_question(message):
                 agent_response, agent_result = generate_response_with_agent(db, message)
                 if agent_response:
@@ -200,11 +209,9 @@ async def _stream_response_generator(db: Session, message: str, thread_id: str):
         }, ensure_ascii=False)
         yield f"data: {final_data}\n\n"
         yield "data: [DONE]\n\n"
-        print(f"✅ Stream generator finished successfully")
+        logger.info("Stream generator finished successfully")
     except Exception as e:
-        print(f"❌ Stream generator error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Stream generator error: %s", e)
         error_data = json.dumps({
             "type": "error",
             "content": "抱歉，服务出现错误，请稍后再试。",
@@ -221,17 +228,12 @@ async def chat_stream(
     db: Session = Depends(get_db),
     user: User = Depends(require_auth),
 ):
-    print(f"\n{'='*60}")
-    print(f"🚀 SSE stream request received")
-    print(f"   User: {user.id}")
-    print(f"   Message: {req.message[:50]}...")
-    print(f"   Thread: {req.thread_id}")
-    print(f"{'='*60}\n")
+    logger.info("SSE stream request received: user=%s, message=%s..., thread=%s", user.id, req.message[:50], req.thread_id)
     
     user_id = user.id
     thread = create_or_get_thread(db, user_id, req.thread_id)
     
-    print(f"✅ Thread created/loaded: {thread.id}")
+    logger.info("Thread created/loaded: %s", thread.id)
     
     return StreamingResponse(
         _stream_response_generator(db, req.message, thread.id),
@@ -253,6 +255,58 @@ async def oag_chat_endpoint(
     from services.oag_service import oag_chat
     result = await oag_chat(db, request.get("message", ""), user.id if user else "anonymous")
     return result
+
+
+async def _oag_stream_generator(db: Session, message: str):
+    from services.oag_service import oag_chat_stream
+    try:
+        yield "data: " + json.dumps({"type": "connected"}, ensure_ascii=False) + "\n\n"
+
+        full_answer = ""
+        async for chunk_type, chunk_content in oag_chat_stream(db, message):
+            full_answer += chunk_content
+            data = json.dumps({
+                "type": "answer",
+                "content": chunk_content,
+                "thinking": "",
+                "answer": full_answer,
+            }, ensure_ascii=False)
+            yield f"data: {data}\n\n"
+
+        final_data = json.dumps({
+            "type": "done",
+            "thinking": "",
+            "answer": full_answer,
+            "thread_id": "",
+        }, ensure_ascii=False)
+        yield f"data: {final_data}\n\n"
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        logger.error("OAG stream error: %s: %s", type(e).__name__, e)
+        error_data = json.dumps({
+            "type": "error",
+            "content": str(e),
+        }, ensure_ascii=False)
+        yield f"data: {error_data}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+@router.post("/oag/stream")
+async def oag_chat_stream_endpoint(
+    request: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_current_user),
+):
+    message = request.get("message", "")
+    return StreamingResponse(
+        _oag_stream_generator(db, message),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/oag/analyze/{object_id}")

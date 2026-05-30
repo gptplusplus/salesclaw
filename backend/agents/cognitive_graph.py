@@ -7,6 +7,9 @@ from llm import get_llm_client
 import os
 import uuid
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 MAX_REFLECTION_ROUNDS = 2
 
@@ -42,7 +45,7 @@ def perceive_node(state: AgentState):
                 memory_context = "\n".join([f"- {m}" for m in memory_items])
                 summary += f"\n\n近期记忆参考：\n{memory_context}"
         except Exception as e:
-            print(f"Memory retrieval in perceive failed: {e}")
+            logger.warning("Memory retrieval in perceive failed: %s", e)
 
         try:
             messages = state.get("messages", [])
@@ -53,7 +56,7 @@ def perceive_node(state: AgentState):
                     oag_text = format_context_for_llm(oag_context)
                     summary += f"\n\nOntology 上下文：\n{oag_text}"
         except Exception as e:
-            print(f"Ontology context in perceive failed: {e}")
+            logger.warning("Ontology context in perceive failed: %s", e)
     finally:
         db.close()
 
@@ -92,7 +95,7 @@ def reason_node(state: AgentState):
         finally:
             db.close()
     except Exception as e:
-        print(f"Memory retrieval failed: {e}")
+        logger.warning("Memory retrieval failed: %s", e)
 
     memory_note = f"\nRelevant Memory Context:\n{memory_context}" if memory_context else ""
     user_input = state.get("messages", [])[-1].content if state.get("messages") else ""
@@ -115,7 +118,7 @@ def reason_node(state: AgentState):
         finally:
             db.close()
     except Exception as e:
-        print(f"Ontology context in reason failed: {e}")
+        logger.warning("Ontology context in reason failed: %s", e)
 
     reasoning_type = _classify_reasoning_type(user_input)
 
@@ -208,7 +211,7 @@ def _execute_attribution_reasoning(user_input: str, perception_data: str, memory
         finally:
             db.close()
     except Exception as e:
-        print(f"Attribution reasoning failed: {e}")
+        logger.warning("Attribution reasoning failed: %s", e)
     
     return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
 
@@ -245,7 +248,7 @@ def _execute_causal_reasoning(user_input: str, perception_data: str, memory_note
         finally:
             db.close()
     except Exception as e:
-        print(f"Causal reasoning failed: {e}")
+        logger.warning("Causal reasoning failed: %s", e)
 
     return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
 
@@ -281,7 +284,7 @@ def _execute_temporal_reasoning(user_input: str, perception_data: str, memory_no
         finally:
             db.close()
     except Exception as e:
-        print(f"Temporal reasoning failed: {e}")
+        logger.warning("Temporal reasoning failed: %s", e)
 
     return _fallback_llm_reasoning(user_input, perception_data, memory_note, ontology_note)
 
@@ -521,7 +524,7 @@ def reflect_node(state: AgentState):
         finally:
             db.close()
     except Exception as e:
-        print(f"Failed to store reflection memory: {e}")
+        logger.warning("Failed to store reflection memory: %s", e)
 
     return {
         "reflection_notes": response.content,

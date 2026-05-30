@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Bot, User, Sparkles, Lightbulb, AlertTriangle, TrendingUp, Target, ChevronDown, ChevronUp, Brain } from 'lucide-react';
+import { MessageSquare, Send, Bot, User, Sparkles, Lightbulb, AlertTriangle, TrendingUp, Target, ChevronDown, ChevronUp, Brain, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import apiClient from '../api/client';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -28,6 +28,7 @@ const ChatInterface: React.FC = () => {
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [showQuickQuestions, setShowQuickQuestions] = useState(true);
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
+  const [failedMessages, setFailedMessages] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -40,13 +41,47 @@ const ChatInterface: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
-    setMessages([{
-      id: 'welcome',
-      role: 'assistant',
-      content: '您好！我是SalesClaw AI助手。我可以帮您分析业务数据、提供决策建议、解答关于医生/医院/产品的问题。请问有什么可以帮助您的？',
-      timestamp: new Date(),
-    }]);
+    const saved = localStorage.getItem('salesclaw_chat_messages');
+    const savedThreadId = localStorage.getItem('salesclaw_thread_id');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setMessages(parsed);
+        if (parsed.length <= 1) {
+          setShowQuickQuestions(true);
+        }
+      } catch {
+        setMessages([{
+          id: 'welcome',
+          role: 'assistant',
+          content: '您好！我是SalesClaw AI助手。我可以帮您分析业务数据、提供决策建议、解答关于医生/医院/产品的问题。请问有什么可以帮助您的？',
+          timestamp: new Date(),
+        }]);
+      }
+    } else {
+      setMessages([{
+        id: 'welcome',
+        role: 'assistant',
+        content: '您好！我是SalesClaw AI助手。我可以帮您分析业务数据、提供决策建议、解答关于医生/医院/产品的问题。请问有什么可以帮助您的？',
+        timestamp: new Date(),
+      }]);
+    }
+    if (savedThreadId) {
+      setThreadId(savedThreadId);
+    }
   }, []);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem('salesclaw_chat_messages', JSON.stringify(messages));
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (threadId) {
+      localStorage.setItem('salesclaw_thread_id', threadId);
+    }
+  }, [threadId]);
 
   const toggleThinking = useCallback((messageId: string) => {
     setExpandedThinking(prev => ({
@@ -135,6 +170,7 @@ const ChatInterface: React.FC = () => {
         threadId
       );
     } catch (error) {
+      setFailedMessages(prev => new Set(prev).add(streamingMessage.id));
       setMessages(prev => prev.map(m => 
         m.id === streamingMessage.id 
           ? { 
@@ -146,6 +182,13 @@ const ChatInterface: React.FC = () => {
       ));
     } finally {
       setIsSending(false);
+      setMessages(prev => {
+        const msg = prev.find(m => m.id === streamingMessage.id);
+        if (msg && !msg.content && !msg.isStreaming) {
+          setFailedMessages(fPrev => new Set(fPrev).add(streamingMessage.id));
+        }
+        return prev;
+      });
     }
   };
 
@@ -154,8 +197,106 @@ const ChatInterface: React.FC = () => {
     inputRef.current?.focus();
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const handleRetry = async (messageId: string) => {
+    setFailedMessages(prev => {
+      const next = new Set(prev);
+      next.delete(messageId);
+      return next;
+    });
+    const msgIndex = messages.findIndex(m => m.id === messageId);
+    if (msgIndex < 0) return;
+    let userMsg = '';
+    for (let i = msgIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userMsg = messages[i].content;
+        break;
+      }
+    }
+    if (!userMsg) return;
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+    const retryStreamingMessage: ChatMessage = {
+      id: `assistant_${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      thinking: '',
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+    setMessages(prev => [...prev, retryStreamingMessage]);
+    const userId = localStorage.getItem('user_id') || 'admin';
+    setIsSending(true);
+    try {
+      await apiClient.chatStream(
+        userMsg,
+        userId,
+        (chunk) => {
+          if (chunk.type === 'thinking') {
+            setMessages(prev => prev.map(m =>
+              m.id === retryStreamingMessage.id
+                ? { ...m, thinking: m.thinking + chunk.content }
+                : m
+            ));
+          } else if (chunk.type === 'answer') {
+            setMessages(prev => prev.map(m =>
+              m.id === retryStreamingMessage.id
+                ? { ...m, content: m.content + chunk.content }
+                : m
+            ));
+          } else if (chunk.type === 'done') {
+            setThreadId(chunk.thread_id);
+            setMessages(prev => prev.map(m =>
+              m.id === retryStreamingMessage.id
+                ? { ...m, isStreaming: false }
+                : m
+            ));
+          } else if (chunk.type === 'error') {
+            console.error('Stream error:', chunk.content);
+            setFailedMessages(fPrev => new Set(fPrev).add(retryStreamingMessage.id));
+            setMessages(prev => prev.map(m =>
+              m.id === retryStreamingMessage.id
+                ? {
+                    ...m,
+                    content: chunk.content || '抱歉，服务暂时不可用。请稍后再试。',
+                    isStreaming: false,
+                  }
+                : m
+            ));
+          }
+        },
+        (error) => {
+          console.error('Stream error:', error);
+          setFailedMessages(fPrev => new Set(fPrev).add(retryStreamingMessage.id));
+          setMessages(prev => prev.map(m =>
+            m.id === retryStreamingMessage.id
+              ? {
+                  ...m,
+                  content: m.content || '抱歉，服务暂时不可用。请稍后再试。',
+                  isStreaming: false,
+                }
+              : m
+          ));
+        },
+        threadId
+      );
+    } catch (error) {
+      setFailedMessages(fPrev => new Set(fPrev).add(retryStreamingMessage.id));
+      setMessages(prev => prev.map(m =>
+        m.id === retryStreamingMessage.id
+          ? {
+              ...m,
+              content: '抱歉，服务暂时不可用。请稍后再试。',
+              isStreaming: false,
+            }
+          : m
+      ));
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const formatTime = (date: Date | string) => {
+    const d = typeof date === 'string' ? new Date(date) : date;
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   };
 
   return (
@@ -255,6 +396,15 @@ const ChatInterface: React.FC = () => {
                       <p className={`text-[10px] mt-1 ${message.role === 'user' ? 'text-white/70' : 'text-gray-700'}`}>
                         {formatTime(message.timestamp)}
                       </p>
+                      {!message.isStreaming && failedMessages.has(message.id) && (
+                        <button
+                          onClick={() => handleRetry(message.id)}
+                          className="flex items-center space-x-1 mt-1 text-xs text-red-500 hover:text-red-600 transition-colors"
+                        >
+                          <RefreshCw size={12} />
+                          <span>重试</span>
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -293,7 +443,7 @@ const ChatInterface: React.FC = () => {
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder="输入您的问题，如：张主任最近怎么样？"
             className="flex-1 px-4 py-3 bg-gray-50 rounded-xl border border-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500/30 text-sm"
             disabled={isSending}

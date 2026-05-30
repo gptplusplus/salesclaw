@@ -15,12 +15,6 @@ interface OntologyObjectResponse {
   metadata: Record<string, any>;
 }
 
-interface SearchResponse {
-  results: OntologyObjectResponse[];
-  total: number;
-  limit: number;
-}
-
 interface ActionResponse {
   success: boolean;
   data?: Record<string, any>;
@@ -57,9 +51,10 @@ class ApiClient {
   private baseUrl: string;
   private ws: WebSocket | null = null;
   private wsReconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
+  private maxReconnectAttempts = 100;
   private wsOnMessage: ((data: any) => void) | null = null;
   private wsOnError: ((error: Event) => void) | null = null;
+  private heartbeatInterval: number | null = null;
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
@@ -142,10 +137,7 @@ class ApiClient {
   ): Promise<void> {
     const url = `${this.baseUrl}/api/chat/stream`;
     const token = localStorage.getItem('auth_token');
-    
-    console.log('[SSE] Request to:', url);
-    console.log('[SSE] Token present:', !!token);
-    
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -162,15 +154,11 @@ class ApiClient {
         }),
       });
 
-      console.log('[SSE] Response status:', response.status);
-      console.log('[SSE] Response headers:', Object.fromEntries(response.headers.entries()));
-
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Unknown error' }));
         throw new Error(error.error || error.detail || `HTTP ${response.status}`);
       }
 
-      // 使用标准SSE解析方式
       const reader = response.body?.getReader();
       if (!reader) {
         throw new Error('Response body is not readable');
@@ -178,44 +166,34 @@ class ApiClient {
 
       const decoder = new TextDecoder();
       let buffer = '';
-      let totalChunks = 0;
-
-      console.log('[SSE] Reader created, starting to read stream...');
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
-          console.log('[SSE] Stream ended. Total chunks:', totalChunks);
           break;
         }
 
         buffer += decoder.decode(value, { stream: true });
-        
-        // 处理完整的SSE行
+
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // 保留不完整的最后一行
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           const trimmedLine = line.trim();
-          
-          // 跳过空行和注释
+
           if (!trimmedLine || trimmedLine.startsWith(':')) {
             continue;
           }
 
-          // 解析SSE data字段
           if (trimmedLine.startsWith('data: ')) {
             const dataStr = trimmedLine.slice(6).trim();
-            
+
             if (dataStr === '[DONE]') {
-              console.log('[SSE] Received [DONE] marker');
               continue;
             }
 
             try {
               const data = JSON.parse(dataStr);
-              totalChunks++;
-              console.log(`[SSE] Chunk #${totalChunks}: type=${data.type}`);
               onChunk(data);
             } catch (e) {
               console.warn('[SSE] Failed to parse stream data:', dataStr, e);
@@ -238,15 +216,8 @@ class ApiClient {
     return this.request(`/api/ontology/${objectType}/${objectId}?user_id=${userId}`);
   }
 
-  async searchOntologyObjects(
-    objectType: string,
-    query: string,
-    userId: string,
-    limit: number = 10
-  ): Promise<SearchResponse> {
-    return this.request(
-      `/api/ontology/${objectType}/search?query=${encodeURIComponent(query)}&limit=${limit}&user_id=${userId}`
-    );
+  async searchOntologyObjects(objectType: string, query: string): Promise<any[]> {
+    return this.request(`/api/ontology/objects/${objectType}/search?q=${encodeURIComponent(query)}`);
   }
 
   async createOntologyObject(objectType: string, data: Record<string, any>): Promise<any> {
@@ -402,6 +373,12 @@ class ApiClient {
 
     this.ws.onopen = () => {
       this.wsReconnectAttempts = 0;
+      if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = window.setInterval(() => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({ type: 'ping' }));
+        }
+      }, 30000);
     };
 
     this.ws.onmessage = (event) => {
@@ -410,14 +387,13 @@ class ApiClient {
     };
 
     this.ws.onerror = (error) => {
-      // WebSocket error events are often triggered during normal reconnection
-      // The actual connection status will be handled by onclose
       this.wsOnError?.(error);
     };
 
     this.ws.onclose = () => {
+      if (this.heartbeatInterval) { clearInterval(this.heartbeatInterval); this.heartbeatInterval = null; }
       if (this.wsReconnectAttempts < this.maxReconnectAttempts) {
-        const delay = Math.min(1000 * Math.pow(2, this.wsReconnectAttempts), 5000);
+        const delay = Math.min(1000 * Math.pow(2, this.wsReconnectAttempts), 30000);
         setTimeout(() => {
           this.wsReconnectAttempts++;
           this.connectWebSocketInternal(userId);
@@ -443,6 +419,7 @@ class ApiClient {
   }
 
   disconnectWebSocket(): void {
+    if (this.heartbeatInterval) { clearInterval(this.heartbeatInterval); this.heartbeatInterval = null; }
     if (this.ws) {
       this.ws.close();
       this.ws = null;

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from models.action import ActionProposal
 from models.execution import ExecutionLog
 from schemas.action import ReasoningChainSchema, ActionDefinitionSchema, PendingActionSchema
-from services.ontology_service import _split_field
+from services.domain_mapper import _split_field
 import uuid
 import json
 from datetime import datetime, timezone

@@ -1,20 +1,24 @@
 
 import React, { ReactNode, useState, useEffect } from 'react';
-import { LayoutDashboard, Activity, Settings, Bell, Search, Command, GitBranch, Sparkles, Network, X, CheckCircle, AlertTriangle, Info, Lightbulb, MessageSquare, LogOut } from 'lucide-react';
+import { LayoutDashboard, Activity, Settings, Bell, Network, X, CheckCircle, AlertTriangle, Info, Lightbulb, MessageSquare, LogOut, HelpCircle, ChevronDown, Sparkles, Brain, Target, Wrench } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOntologyContext } from '../contexts/OntologyContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWebSocketChat } from '../api/hooks';
+import GlobalSearch from './GlobalSearch';
 
 interface LayoutProps {
   children: ReactNode;
   activeTab: string;
   onTabChange: (tab: string) => void;
+  onNavigateToOntology?: (objectId: string) => void;
+  onShowHelp?: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => {
+const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange, onNavigateToOntology, onShowHelp }) => {
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const { state, getUnreadNotifications, markNotificationRead, dismissSuggestion, dismissReminder } = useOntologyContext();
   const { user, logout } = useAuth();
   const wsChat = useWebSocketChat(user?.id || 'default_user');
@@ -78,46 +82,66 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
         </div>
 
         <nav className="flex-1 py-6 space-y-1 px-3 md:px-4 relative z-10">
-          <NavItem 
-            icon={<LayoutDashboard size={18} />} 
-            label="决策中枢" 
-            active={activeTab === 'decision'} 
-            onClick={() => onTabChange('decision')}
+          <NavItem
+            icon={<LayoutDashboard size={18} />}
+            label="工作台"
+            active={activeTab === 'workspace'}
+            onClick={() => onTabChange('workspace')}
           />
-          <NavItem 
-            icon={<Network size={18} />} 
-            label="知识图谱" 
-            active={activeTab === 'ontology'} 
+          <NavItem
+            icon={<Network size={18} />}
+            label="知识图谱"
+            active={activeTab === 'ontology'}
             onClick={() => onTabChange('ontology')}
           />
-          <NavItem 
-            icon={<Command size={18} />} 
-            label="场景推演" 
-            active={activeTab === 'scenario'} 
-            onClick={() => onTabChange('scenario')}
-          />
-          <NavItem 
-            icon={<Sparkles size={18} />} 
-            label="智能洞察" 
-            active={activeTab === 'insights'} 
+
+          <div className="flex items-center gap-2 px-3 md:px-3.5 py-3">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">数据</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
+
+          <NavItem
+            icon={<Sparkles size={18} />}
+            label="智能洞察"
+            active={activeTab === 'insights'}
             onClick={() => onTabChange('insights')}
           />
           <NavItem
-            icon={<GitBranch size={18} />}
-            label="AI 规则"
+            icon={<Brain size={18} />}
+            label="推理规则"
             active={activeTab === 'rules'}
             onClick={() => onTabChange('rules')}
           />
+
+          <div className="flex items-center gap-2 px-3 md:px-3.5 py-3">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">行动</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
+
+          <NavItem
+            icon={<Target size={18} />}
+            label="场景推演"
+            active={activeTab === 'scenario'}
+            onClick={() => onTabChange('scenario')}
+          />
           <NavItem
             icon={<MessageSquare size={18} />}
-            label="AI 对话"
+            label="AI 助手"
             active={activeTab === 'chat'}
             onClick={() => onTabChange('chat')}
+          />
+          <NavItem
+            icon={<Wrench size={18} />}
+            label="AI 工具箱"
+            active={activeTab === 'tools'}
+            onClick={() => onTabChange('tools')}
           />
         </nav>
 
         <div className="p-4 border-t border-slate-100 bg-gradient-to-t from-slate-50/80 to-transparent">
-          <NavItem icon={<Settings size={18} />} label="系统设置" />
+          <NavItem icon={<HelpCircle size={18} />} label="帮助" onClick={onShowHelp} />
         </div>
       </aside>
 
@@ -146,13 +170,11 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
           </div>
 
           <div className="flex items-center space-x-3">
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-              <input 
-                type="text" 
-                placeholder="搜索本体对象..." 
-                className="bg-slate-100 border border-slate-200 focus:bg-white focus:border-medical-400 rounded-lg py-1.5 pl-9 pr-3.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-medical-50 w-56 transition-all duration-200"
-              />
+            <div className="hidden md:block">
+              <GlobalSearch onSelectObject={(obj) => {
+                onNavigateToOntology?.(obj.id);
+                onTabChange('ontology');
+              }} />
             </div>
             
             <div className="relative">
@@ -278,15 +300,40 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange }) => 
               </AnimatePresence>
             </div>
             
-            <div className="flex items-center space-x-2 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100">
-              <span className="text-xs font-medium text-slate-600">{user?.displayName || '管理员'}</span>
+            <div className="relative">
               <button 
-                onClick={logout}
-                className="p-1 text-slate-400 hover:text-red-500 transition-colors"
-                title="退出登录"
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center space-x-2 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100 hover:bg-slate-100 transition-colors"
               >
-                <LogOut size={14} />
+                <span className="text-xs font-medium text-slate-600">{user?.displayName || '管理员'}</span>
+                <ChevronDown size={12} className="text-slate-400" />
               </button>
+              <AnimatePresence>
+                {showUserMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    className="absolute right-0 top-8 w-36 bg-white rounded-lg shadow-lg border border-slate-200 z-50 overflow-hidden"
+                  >
+                    <button
+                      onClick={() => { setShowUserMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
+                    >
+                      <Settings size={14} />
+                      <span>系统设置</span>
+                    </button>
+                    <div className="border-t border-slate-100" />
+                    <button
+                      onClick={() => { setShowUserMenu(false); logout(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      <LogOut size={14} />
+                      <span>退出登录</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </header>
